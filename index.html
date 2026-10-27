@@ -398,6 +398,7 @@ label.pillbtn{cursor:pointer;display:inline-flex;align-items:center}
 </head>
 <body>
 <!-- ===== WRD license gate V.2 (creator edition) ===== -->
+<script>/* keys can only be checked over https: send plain http visitors to the secure address */(function(){try{var l=location;if(l.protocol==='http:'&&!/^(localhost|127\.|192\.168\.|10\.|\[?::1)/.test(l.hostname))l.replace('https://'+l.host+l.pathname+l.search+l.hash)}catch(e){}})()</script>
 <style>
 html.wrd-locked body>*:not(#wrdGate){visibility:hidden!important}
 html.wrd-locked,html.wrd-locked body{overflow:hidden!important}
@@ -433,6 +434,7 @@ textarea.wg-in{height:74px;padding:12px 14px;line-height:1.4;resize:vertical}
 .wg-plan b{display:block;font-size:22px;font-weight:900;letter-spacing:-.02em}
 .wg-plan span{font-size:11.5px;color:#98a0b3}
 .wg-plan.hot{border-color:rgba(122,92,255,.6);background:rgba(122,92,255,.1)}
+.wg-plan.wg-life{grid-column:1/-1}.wg-plan.wg-life b{letter-spacing:.06em}
 .wg-steps{margin:0 0 14px;padding:0 0 0 18px;font-size:13px;line-height:1.55;color:#c7cee0}
 .wg-steps b{color:#fff}
 .wg-shake{animation:wgShake .4s}
@@ -544,9 +546,11 @@ textarea.wg-in{height:74px;padding:12px 14px;line-height:1.4;resize:vertical}
   function planCards(box){var p=(LIST&&LIST.prices)||{},L=lsBuyLinks(),G=grBuy();box.textContent='';var items=[];
     if(p.monthly||L.monthly)items.push([p.monthly?'$'+p.monthly:'Monthly','per month · cancel anytime',false,L.monthly||G,'Get Monthly']);
     if(p.yearly||L.yearly)items.push([p.yearly?'$'+p.yearly:'Yearly','per year'+(p.monthly&&p.yearly&&p.monthly*12>p.yearly?' · save $'+Math.round(p.monthly*12-p.yearly):''),true,L.yearly||G,'Get Yearly']);
-    if(p.lifetime||L.lifetime)items.push([p.lifetime?'$'+p.lifetime:'Lifetime','one-time · yours forever',!p.yearly,L.lifetime||G,'Get Lifetime']);
+    if(p.lifetime||L.lifetime)items.push(['$$$','Contact WRDMOTION for a full license if serious',!p.yearly,igDM(),'Contact @'+contactInfo().ig,'life']);
     box.hidden=!items.length;items.forEach(function(it){var d=document.createElement('div');d.className='wg-plan'+(it[2]?' hot':'');var b=document.createElement('b');b.textContent=it[0];var s=document.createElement('span');s.textContent=it[1];d.append(b,s);
+      if(it[5]==='life')d.classList.add('wg-life');
       if(it[3]&&/^https:\/\//.test(it[3])){var a=document.createElement('a');a.className='wg-buybtn';a.href=it[3];a.target='_blank';a.rel='noopener';a.textContent=it[4];d.append(a)}box.append(d)})}
+  function igDM(){return 'https://ig.me/m/'+encodeURIComponent(contactInfo().ig)}
   function setPlans(){planCards($('wgPlans'));var fp=$('wgFormPlans');if(fp){planCards(fp);if(!lsCfg()&&!grBuy())fp.hidden=true;var L=lsBuyLinks(),t=$('wgTrialBtn');if(t){t.hidden=!L.trial;if(L.trial)t.href=L.trial}}}
   function showBuy(){var b=$('wgBuy');if(!b)return;var c=contactInfo();b.textContent='';
     if(grBuy()&&!lsCfg()){b.append('Bought WRD on Gumroad? Paste the license key from your receipt. No key yet? ');var g0=document.createElement('a');g0.href=grBuy();g0.target='_blank';g0.rel='noopener';g0.textContent='Get WRD';b.append(g0,' · questions: ');var a1=document.createElement('a');a1.href='https://ig.me/m/'+encodeURIComponent(c.ig);a1.target='_blank';a1.rel='noopener';a1.textContent='@'+c.ig;b.append(a1,'.');return}
