@@ -573,8 +573,13 @@ textarea.wg-in{height:74px;padding:12px 14px;line-height:1.4;resize:vertical}
     $('wgPlans').hidden=!(plan==='trial'||plan==='monthly'||plan==='yearly')||why==='blocked';setContacts('WRD license — '+(PLAN[plan]||'key'));lock('wgEnd')}
   function setLic(g,e){var plan=(e&&e.t)||g.plan||'life',exp=(e&&e.x)||g.exp||null;
     window.WRD_LIC={user:g.u===GRU?(g.n||'creator'):g.u,plan:plan,planName:PLAN[plan]||plan,exp:exp,daysLeft:daysLeft(exp),maxRes:plan==='trial'?720:0};
-    makeSync(g);
+    makeSync(g);makeCloud(g);
     try{window.dispatchEvent(new CustomEvent('wrd-license',{detail:window.WRD_LIC}))}catch(x){}}
+  /* cloud captions: a private pass made from the license (the key itself never leaves the device) */
+  var CSALT='WRD-OTMV-cloud-v1';
+  function makeCloud(g){window.WRD_CLOUD=null;if(!g||g.ls||!g.k||!window.crypto||!crypto.subtle)return;var u=g.u,k=g.k,p=null;
+    window.WRD_CLOUD={plan:(window.WRD_LIC&&window.WRD_LIC.plan)||'',token:function(){if(!p)p=(async function(){var enc=new TextEncoder();var base=await crypto.subtle.importKey('raw',enc.encode(normU(u)+':'+normK(k)),'PBKDF2',false,['deriveBits']);
+      var bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:enc.encode(CSALT),iterations:60000},base,256);return b64u(new Uint8Array(bits))})();return p}}}
   /* ---- cloud save: presets + work, stored on the hub under an id only this username + key can make,
      sealed with AES-GCM before it leaves the device (the hub and the admin only ever see ciphertext) ---- */
   var SSALT='WRD-OTMV-sync-v1';
@@ -600,7 +605,7 @@ textarea.wg-in{height:74px;padding:12px 14px;line-height:1.4;resize:vertical}
     if(L.plan==='life'&&d==null)return;setTimeout(function(){c.classList.add('on')},900);setTimeout(function(){c.classList.remove('on')},6500)}
   async function ping(g,e){if(!LIST||!LIST.hub||!/^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)[:\/])/.test(LIST.hub))return{ok:true};
     try{var r=await fetch(LIST.hub,{method:'POST',body:JSON.stringify({a:'ping',id:g.id,dev:devId(),ua:devInfo(),plan:(e&&e.t)||'life',dl:(e&&e.dl)||((e&&e.t)==='trial'?1:2),u:g.u})});var j=await r.json();return j||{ok:true}}catch(x){return{ok:true,offline:true}}}
-  window.wrdSignOut=function(){var g0=readGrant();if(g0&&g0.ls&&g0.inst){lsCall('deactivate',{key:g0.k,instance:g0.inst}).catch(function(){})}clearGrant();window.WRD_LIC=null;window.WRD_SYNC=null;msg('Signed out.');var u=$('wgUser'),k=$('wgKey');if(u)u.value='';if(k)k.value='';lock('wgForm');
+  window.wrdSignOut=function(){var g0=readGrant();if(g0&&g0.ls&&g0.inst){lsCall('deactivate',{key:g0.k,instance:g0.inst}).catch(function(){})}clearGrant();window.WRD_LIC=null;window.WRD_SYNC=null;window.WRD_CLOUD=null;msg('Signed out.');var u=$('wgUser'),k=$('wgKey');if(u)u.value='';if(k)k.value='';lock('wgForm');
     try{window.dispatchEvent(new CustomEvent('wrd-signout'))}catch(x){}};
   window.wrdContact=async function(){try{if(!LIST)await fetchList()}catch(e){}return contactInfo()};
   window.wrdStay=function(v){if(v===undefined)return stayOn();try{localStorage.setItem('wrd.stay',v?'1':'0')}catch(e){}var g=readGrant();if(g)saveGrant(g);var c=$('wgStay');if(c)c.checked=!!v;return !!v};
@@ -4035,56 +4040,167 @@ async function probeDecode(url){const v=document.createElement('video');v.muted=
 async function useConverted(blob,o={}){const url=URL.createObjectURL(blob);const tv=document.createElement('video');tv.muted=true;tv.preload='metadata';tv.src=url;
   const ok=await new Promise(r=>{tv.onloadedmetadata=()=>r(!!tv.videoWidth);tv.onerror=()=>r(false);setTimeout(()=>r(false),12000)});const w=tv.videoWidth,hh=tv.videoHeight;try{tv.removeAttribute('src');tv.load()}catch(e){}
   if(!ok||!P.video){URL.revokeObjectURL(url);if(!o.restore)toast('The converted copy couldn’t be opened. Try converting again.');return false}
-  if(vidURL)URL.revokeObjectURL(vidURL);vidURL=url;resetProxy();Object.assign(P.video,{noPreview:false,slowDecode:false,conv:{w,h:hh}});showVid=true;
+  if(vidURL)URL.revokeObjectURL(vidURL);vidURL=url;resetProxy();Object.assign(P.video,{noPreview:false,slowDecode:false,conv:{w,h:hh,quick:!!o.quick}});showVid=true;
   bgV.src=vidURL;bgV.muted=false;await new Promise(r=>{bgV.addEventListener('loadedmetadata',r,{once:true});setTimeout(r,4000)});try{bgV.currentTime=T}catch(e){}
   applyProxy();updBg();sizeView();rebuild('video',true);changed({tl:false});return true}
 const FFV=['0.12.15','0.12.10'],FFCORE='0.12.10',FFCDN=['https://unpkg.com','https://cdn.jsdelivr.net/npm'];
+/* ===== fast conversion on the device's video chip (WebCodecs) =====
+   Reads the camera file's own samples (no big library), decodes them with the hardware decoder when the browser has one
+   (Safari on iPhone/iPad/Mac, Chrome on Mac and many PCs/Android phones), re-encodes a 1080p H.264 copy and copies the AAC
+   sound across untouched. Usually seconds instead of minutes. Anything unsupported → null, and the regular converter runs. */
+function videoTrack(dv,moov){
+  for(const trak of find(dv,moov,['trak'])){const hd=find(dv,trak,['mdia','hdlr'])[0];if(!hd||fcc(dv,hd.body+8)!=='vide')continue;
+    const md=find(dv,trak,['mdia','mdhd'])[0];if(!md)continue;const mv=dv.getUint8(md.body);const timescale=mv===1?dv.getUint32(md.body+20):dv.getUint32(md.body+12);
+    const tk=find(dv,trak,['tkhd'])[0];let ma=65536,mb=0;if(tk){const tv=dv.getUint8(tk.body),o=tk.body+(tv===1?12:0);ma=dv.getInt32(o+40);mb=dv.getInt32(o+44)}
+    const stbl=find(dv,trak,['mdia','minf','stbl'])[0];if(!stbl)continue;const g=t=>kids(dv,stbl.body,stbl.end).find(k=>k.type===t);
+    const stsd=g('stsd');if(!stsd)continue;const e=stsd.body+8,entEnd=e+dv.getUint32(e),fmt=fcc(dv,e+4);const cw=dv.getUint16(e+32),ch=dv.getUint16(e+34);
+    let cfg=null;kids(dv,e+86,entEnd).forEach(k=>{if(!cfg&&/^(hvcC|avcC|vpcC|av1C)$/.test(k.type))cfg={type:k.type,bytes:new Uint8Array(dv.buffer.slice(dv.byteOffset+k.body,dv.byteOffset+k.end))}});
+    const stts=g('stts'),ctts=g('ctts'),stss=g('stss'),stsc=g('stsc'),stsz=g('stsz'),stco=g('stco')||g('co64');if(!stts||!stsc||!stsz||!stco)continue;
+    const t={offs:[],sc:[],fixed:dv.getUint32(stsz.body+4),cnt:dv.getUint32(stsz.body+8),sizes:null};const co64=stco.type==='co64',nC=dv.getUint32(stco.body+4);
+    for(let i=0;i<nC;i++)t.offs.push(co64?dv.getUint32(stco.body+8+i*8)*4294967296+dv.getUint32(stco.body+12+i*8):dv.getUint32(stco.body+8+i*4));
+    const nS=dv.getUint32(stsc.body+4);for(let i=0;i<nS;i++)t.sc.push([dv.getUint32(stsc.body+8+i*12),dv.getUint32(stsc.body+12+i*12)]);
+    if(!t.fixed){t.sizes=new Uint32Array(t.cnt);for(let i=0;i<t.cnt;i++)t.sizes[i]=dv.getUint32(stsz.body+12+i*4)}
+    const N=t.cnt,S=new Array(N);let q=0;for(const c of chunkList(t)){let p=0;for(let k=0;k<c.n&&q<N;k++){const sz=t.fixed||t.sizes[c.first+k];S[q++]={off:c.off+p,size:sz,dts:0,cts:0,dur:0,key:!stss};p+=sz}}
+    if(q<N)S.length=q;
+    {let i=0,d=0;const n=dv.getUint32(stts.body+4);for(let j=0;j<n;j++){const c=dv.getUint32(stts.body+8+j*8),dl=dv.getUint32(stts.body+12+j*8);for(let k=0;k<c&&i<S.length;k++){S[i].dts=d;S[i].dur=dl;d+=dl;i++}}}
+    if(ctts){let i=0;/* signed offsets: QuickTime files use negative ones even in version 0 */const n=dv.getUint32(ctts.body+4);for(let j=0;j<n;j++){const c=dv.getUint32(ctts.body+8+j*8),o=dv.getInt32(ctts.body+12+j*8);for(let k=0;k<c&&i<S.length;k++)S[i++].off2=o}}
+    S.forEach(x=>{x.cts=x.dts+(x.off2||0)});if(stss){const n=dv.getUint32(stss.body+4);for(let j=0;j<n;j++){const ix=dv.getUint32(stss.body+8+j*4)-1;if(S[ix])S[ix].key=true}}
+    let mn=Infinity;S.forEach(x=>{if(x.cts<mn)mn=x.cts});if(isFinite(mn)&&mn>0)S.forEach(x=>{x.cts-=mn});
+    return{fmt,timescale,cw,ch,cfg,rot:Math.round(Math.atan2(mb,ma)*180/Math.PI),samples:S}}
+  return null}
+function hevcCodec(fmt,b){const sp=b[1]>>6,tier=(b[1]>>5)&1,pid=b[1]&31;let cf=((b[2]<<24)|(b[3]<<16)|(b[4]<<8)|b[5])>>>0,rv=0;for(let i=0;i<32;i++){rv=(rv<<1)|(cf&1);cf>>>=1}rv>>>=0;
+  const cons=[b[6],b[7],b[8],b[9],b[10],b[11]];while(cons.length&&!cons[cons.length-1])cons.pop();
+  return(fmt==='hev1'?'hev1':'hvc1')+'.'+['','A','B','C'][sp]+pid+'.'+rv.toString(16).toUpperCase()+'.'+(tier?'H':'L')+b[12]+(cons.length?'.'+cons.map(x=>x.toString(16).toUpperCase()).join('.'):'')}
+function trackCodec(vt){const c=vt.cfg;if(!c)return null;const b=c.bytes,hx=x=>x.toString(16).padStart(2,'0');
+  if(c.type==='hvcC'&&b.length>13)return{codec:hevcCodec(vt.fmt,b),description:b};
+  if(c.type==='avcC'&&b.length>4)return{codec:(vt.fmt==='avc3'?'avc3.':'avc1.')+hx(b[1])+hx(b[2])+hx(b[3]),description:b};
+  if(c.type==='vpcC'&&b.length>6)return{codec:'vp09.'+String(b[4]).padStart(2,'0')+'.'+String(b[5]).padStart(2,'0')+'.'+String(b[6]>>4).padStart(2,'0')};
+  if(c.type==='av1C'&&b.length>3){const pr=b[1]>>5,lv=b[1]&31,ti=b[2]>>7,hb=(b[2]>>6)&1,tw=(b[2]>>5)&1;return{codec:'av01.'+pr+'.'+String(lv).padStart(2,'0')+(ti?'H':'M')+'.'+(hb?(tw?'12':'10'):'08'),description:b}}
+  return null}
+async function convertHW(onP,isCancelled){
+  if(typeof VideoDecoder==='undefined'||typeof VideoEncoder==='undefined'||!window.Mp4Muxer||!VFILE)return null;const file=VFILE;
+  const boxes=await topBoxes(file);const mb=boxes.find(b=>b.type==='moov');if(!mb||mb.size>200e6)return null;
+  const dv=await readRange(file,mb.off,mb.off+mb.size);const moov={body:8,end:dv.byteLength};const vt=videoTrack(dv,moov);if(!vt||!vt.samples.length||!vt.samples[0].key)return null;
+  const tc=trackCodec(vt);if(!tc)return null;
+  let dcfg=null;for(const hw of ['prefer-hardware','no-preference']){const c=Object.assign({codec:tc.codec,codedWidth:vt.cw,codedHeight:vt.ch,hardwareAcceleration:hw,optimizeForLatency:false},tc.description?{description:tc.description}:{});
+    try{const r=await VideoDecoder.isConfigSupported(c);if(r&&r.supported){dcfg=c;break}}catch(e){}}
+  if(!dcfg){console.info('HW convert: decoder not available for',tc.codec);return null}
+  /* sound: AAC copied across as-is; anything else → regular converter */
+  const at=audioTrack(dv,moov);let aac=null;
+  if(at){if(at.fmt!=='mp4a'||!at.asc)return null;const chn=((at.asc[1]>>3)&15)||at.ch;const fr=[];for(const c of chunkList(at)){let p=0;for(let k=0;k<c.n;k++){const sz=at.fixed||at.sizes[c.first+k];fr.push({off:c.off+p,len:sz});p+=sz}}aac={chn,sr:at.sr,fr}}
+  const rot=((vt.rot%360)+360)%360,side=rot===90||rot===270;const dw=side?vt.ch:vt.cw,dh=side?vt.cw:vt.ch;
+  const k=Math.min(1,1080/Math.min(dw,dh));const ow=Math.max(2,Math.round(dw*k/2)*2),oh=Math.max(2,Math.round(dh*k/2)*2);
+  const S=vt.samples,ts=vt.timescale,dur=(S[S.length-1].dts+S[S.length-1].dur)/ts||P.video.dur||1,fps=Math.min(60,Math.max(1,Math.round(S.length/dur)));
+  const br=Math.round(Math.min(10e6*ow*oh/(1080*1920),(isMobileUA()?220e6:700e6)*8/dur));
+  let ecfg=null,mc='avc';for(const [codec,m_] of [['avc1.640028','avc'],['avc1.4D4028','avc'],['avc1.42E028','avc'],['avc1.640033','avc'],['vp09.00.40.08','vp9']]){
+    const c={codec,width:ow,height:oh,bitrate:Math.max(1e6,br),framerate:fps,hardwareAcceleration:'no-preference'};if(m_==='avc')c.avc={format:'avc'};try{const q=await VideoEncoder.isConfigSupported(c);if(q.supported){ecfg=c;mc=m_;break}}catch(e){}}
+  if(!ecfg)return null;
+  const mux=new Mp4Muxer.Muxer({target:new Mp4Muxer.ArrayBufferTarget(),video:{codec:mc,width:ow,height:oh,frameRate:fps},audio:aac?{codec:'aac',numberOfChannels:aac.chn,sampleRate:aac.sr}:undefined,fastStart:'in-memory',firstTimestampBehavior:'offset'});
+  if(aac&&typeof mux.addAudioChunkRaw!=='function'&&typeof EncodedAudioChunk==='undefined')return null;
+  /* sound bytes (small) read up front, added in step with the picture */
+  let aBytes=null,aNext=0;const aDur=Math.round(1024/aac?.sr*1e6)||0;
+  if(aac){aBytes=new Array(aac.fr.length);await readChunks(file,aac.fr.map((f,i)=>({off:f.off,len:f.len,i})),(c,buf)=>{aBytes[c.i]=buf.slice()})}
+  const pushAudio=uptoUs=>{if(!aac)return;while(aNext<aBytes.length&&aNext*aDur<=uptoUs){const d=aBytes[aNext],t_=aNext*aDur;
+      const meta=aNext===0?{decoderConfig:{codec:'mp4a.40.2',numberOfChannels:aac.chn,sampleRate:aac.sr,description:at.asc}}:undefined;
+      if(typeof mux.addAudioChunkRaw==='function')mux.addAudioChunkRaw(d,'key',t_,aDur,meta);else mux.addAudioChunk(new EncodedAudioChunk({type:'key',timestamp:t_,duration:aDur,data:d}),meta);aNext++}};
+  const cv=document.createElement('canvas');cv.width=ow;cv.height=oh;const cx=cv.getContext('2d',{alpha:false});
+  let err=null,nIn=0,nOut=0,lastKey=-1e12,lastTs=-1;
+  const enc=new VideoEncoder({output:(ch_,m_)=>{try{mux.addVideoChunk(ch_,m_);pushAudio(ch_.timestamp+5e5)}catch(e){err=err||e}},error:e=>{err=err||e}});enc.configure(ecfg);
+  const dec=new VideoDecoder({output:fr=>{try{if(err||fr.timestamp<=lastTs){fr.close();return}lastTs=fr.timestamp;
+        cx.save();cx.translate(ow/2,oh/2);if(rot)cx.rotate(rot*Math.PI/180);const sw=side?oh:ow,sh=side?ow:oh;cx.drawImage(fr,-sw/2,-sh/2,sw,sh);cx.restore();
+        const t_=fr.timestamp,d_=fr.duration||Math.round(1e6/fps);fr.close();const vf=new VideoFrame(cv,{timestamp:t_,duration:d_});const key=t_-lastKey>=1e6;enc.encode(vf,{keyFrame:key});vf.close();if(key)lastKey=t_;nOut++}
+      catch(e){try{fr.close()}catch(_){}err=err||e}},error:e=>{err=err||e}});
+  dec.configure(dcfg);
+  const wait=()=>new Promise(r=>setTimeout(r,3));
+  try{for(let i=0;i<S.length;){if(isCancelled&&isCancelled())throw 'cancel';if(err)throw err;
+      let j=i+1,a=S[i].off,b=a+S[i].size;while(j<S.length&&S[j].off>=b&&S[j].off-b<2e6&&S[j].off+S[j].size-a<16e6){b=S[j].off+S[j].size;j++}
+      const buf=new Uint8Array(await file.slice(a,b).arrayBuffer());
+      for(let k2=i;k2<j;k2++){const x=S[k2];while(dec.decodeQueueSize>3||enc.encodeQueueSize>3){if(err)throw err;await wait()}
+        dec.decode(new EncodedVideoChunk({type:x.key?'key':'delta',timestamp:Math.round(x.cts/ts*1e6),duration:Math.round(x.dur/ts*1e6),data:buf.subarray(x.off-a,x.off-a+x.size)}));nIn++}
+      i=j;onP&&onP(nOut/S.length);
+      /* nothing coming out after many frames: this decoder can't really handle the file */
+      if(nIn>40&&nOut===0){await new Promise(r=>setTimeout(r,1500));if(nOut===0)throw new Error('decoder produced no frames')}}
+    await dec.flush();await enc.flush();if(err)throw err;pushAudio(Infinity);
+    if(nOut<S.length*.9)throw new Error('only '+nOut+' of '+S.length+' frames decoded');
+    mux.finalize();const blob=new Blob([mux.target.buffer],{type:'video/mp4'});if(!blob.size)throw new Error('empty');
+    console.info('HW convert',tc.codec,'→',ecfg.codec,ow+'×'+oh,nOut,'frames');return blob}
+  finally{try{dec.state!=='closed'&&dec.close()}catch(e){}try{enc.state!=='closed'&&enc.close()}catch(e){}}}
 function loadScript(src){return new Promise((r,j)=>{const sc=document.createElement('script');sc.src=src;sc.crossOrigin='anonymous';sc.onload=r;sc.onerror=()=>{sc.remove();j(new Error('Couldn’t load '+src))};document.head.append(sc)})}
 async function fetchBlobURL(u,type,onP){const r=await fetch(u,{mode:'cors'});if(!r.ok)throw new Error('HTTP '+r.status+' '+u);const total=+r.headers.get('content-length')||0;
   if(!r.body||!total||!onP)return URL.createObjectURL(new Blob([await r.arrayBuffer()],{type}));const rd=r.body.getReader(),parts=[];let got=0;
   for(;;){const {done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;onP(got/total)}return URL.createObjectURL(new Blob(parts,{type}))}
 const withTO=(pr,ms,msg)=>Promise.race([pr,new Promise((_,j)=>setTimeout(()=>j(new Error(msg||'timed out')),ms))]);
-async function loadFF(onP){if(CONV.ff)return CONV.ff;let last=null;
-  for(const cdn of FFCDN)for(const v of FFV){try{
+/* multi-core FFmpeg where the page allows it (Chrome, Edge, Firefox, Android: see _headers), single-core everywhere else */
+let FFMT_OFF=false;
+async function loadFF(onP){if(CONV.ff)return CONV.ff;let last=null;const mtOK=!FFMT_OFF&&self.crossOriginIsolated&&typeof SharedArrayBuffer!=='undefined'&&(navigator.hardwareConcurrency||2)>2&&!isIOS();
+  for(const mt of mtOK?[true,false]:[false])for(const cdn of FFCDN)for(const v of FFV){try{
     if(!window.FFmpegWASM)await loadScript(`${cdn}/@ffmpeg/ffmpeg@${v}/dist/umd/ffmpeg.js`);
-    const classWorkerURL=await fetchBlobURL(`${cdn}/@ffmpeg/ffmpeg@${v}/dist/umd/814.ffmpeg.js`,'text/javascript');
-    const wasmURL=await fetchBlobURL(`${cdn}/@ffmpeg/core@${FFCORE}/dist/umd/ffmpeg-core.wasm`,'application/wasm',onP);
-    for(const flavor of ['esm','umd']){const coreURL=await fetchBlobURL(`${cdn}/@ffmpeg/core@${FFCORE}/dist/${flavor}/ffmpeg-core.js`,'text/javascript');
-      const ff=new window.FFmpegWASM.FFmpeg();try{await withTO(ff.load({coreURL,wasmURL,classWorkerURL}),90000,'The converter took too long to start');CONV.ff=ff;return ff}catch(e){last=e;try{ff.terminate()}catch(_){}}}
-  }catch(e){last=e;console.warn('ffmpeg load',e)}}
+    const classWorkerURL=await fetchBlobURL(`${cdn}/@ffmpeg/ffmpeg@${v}/dist/umd/814.ffmpeg.js`,'text/javascript');const pkg=mt?'core-mt':'core';
+    const wasmURL=await fetchBlobURL(`${cdn}/@ffmpeg/${pkg}@${FFCORE}/dist/umd/ffmpeg-core.wasm`,'application/wasm',onP);
+    for(const flavor of ['esm','umd']){const coreURL=await fetchBlobURL(`${cdn}/@ffmpeg/${pkg}@${FFCORE}/dist/${flavor}/ffmpeg-core.js`,'text/javascript');
+      const workerURL=mt?await fetchBlobURL(`${cdn}/@ffmpeg/${pkg}@${FFCORE}/dist/${flavor}/ffmpeg-core.worker.js`,'text/javascript'):undefined;
+      const ff=new window.FFmpegWASM.FFmpeg();try{await withTO(ff.load(Object.assign({coreURL,wasmURL,classWorkerURL},mt?{workerURL}:{})),90000,'The converter took too long to start');CONV.ff=ff;CONV.mt=mt;console.info('converter ready',mt?'multi-core':'single-core');return ff}catch(e){last=e;try{ff.terminate()}catch(_){}}}
+    break}catch(e){last=e;console.warn('ffmpeg load',mt?'mt':'st',e)}}
   throw last||new Error('The converter couldn’t load')}
 function convUI(){const b=document.getElementById('convBar');if(b)b.style.width=Math.round(CONV.p*100)+'%';const t=document.getElementById('convTxt');if(t)t.textContent=CONV.msg}
-async function convertVideo(){if(CONV.busy||!VFILE||!P.video)return;CONV.busy=true;CONV.p=0;CONV.fail='';CONV.msg='Loading the converter (one time, about 30 MB)…';rebuild('video',true);const key=vidKey(VFILE),dur=P.video.dur||1;let ff=null;
-  try{ff=await loadFF(q=>{CONV.p=q*.05;CONV.msg=`Loading the converter… ${Math.round(q*100)}%`;convUI()});
-    const ext=(VFILE.name.split('.').pop()||'mov').toLowerCase().replace(/[^a-z0-9]/g,'')||'mov';let inPath='in.'+ext,mounted=false;
-    try{try{await ff.createDir('/wrdin')}catch(e){}await ff.mount('WORKERFS',{files:[VFILE]},'/wrdin');inPath='/wrdin/'+VFILE.name;mounted=true}
-    catch(e){if(VFILE.size>MEM.info().conv)throw new Error('This file ('+Math.round(VFILE.size/1e6)+' MB) is too big to convert safely on this device. Trim it, or export it as H.264 first.');CONV.msg='Reading your video…';convUI();await ff.writeFile(inPath,new Uint8Array(await VFILE.arrayBuffer()))}
-    CONV.t0=performance.now();CONV.msg='Converting… 0%';convUI();
-    const prog=q=>{if(!(q>=0))return;CONV.p=.05+clamp(q)*.93;const el=(performance.now()-CONV.t0)/1000,left=q>.02?el/q*(1-q):0;CONV.msg=`Converting… ${Math.round(clamp(q)*100)}%`+(left>1?` · about ${left<90?Math.ceil(left)+' s':Math.ceil(left/60)+' min'} left`:'');convUI()};
-    ff.on('log',({message})=>{const m=/time=(\d+):(\d+):([\d.]+)/.exec(message||'');if(m)prog((+m[1]*3600+ +m[2]*60+ +m[3])/dur)});
-    const short=Math.min(1080,Math.min(P.video.w||1080,P.video.h||1080)||1080);
-    const vf=`scale='if(gt(iw,ih),-2,${short})':'if(gt(iw,ih),${short},-2)':flags=bicubic,format=yuv420p`;
-    const rc=await ff.exec(['-hide_banner','-i',inPath,'-map','0:v:0','-map','0:a:0?','-vf',vf,'-c:v','libx264','-preset','ultrafast','-crf','19','-c:a','aac','-b:a','192k','-write_tmcd','0','-movflags','+faststart','-y','wrd_out.mp4']);
-    if(typeof rc==='number'&&rc!==0)throw new Error('The converter couldn’t read this file (code '+rc+').');
-    CONV.msg='Finishing…';CONV.p=.99;convUI();const data=await ff.readFile('wrd_out.mp4');try{await ff.deleteFile('wrd_out.mp4')}catch(e){}if(mounted){try{await ff.unmount('/wrdin')}catch(e){}}else{try{await ff.deleteFile(inPath)}catch(e){}}
-    const blob=new Blob([data.buffer||data],{type:'video/mp4'});if(!blob.size)throw new Error('The converted file came out empty.');
-    if(!P.video||vidKey(VFILE)!==key)return;IDB.put('conv',{key,blob}).catch(()=>{});
-    if(await useConverted(blob))toast('Video converted · smooth preview, captions and Video + Text export now use the 1080p copy')}
-  catch(e){console.warn('convert',e);if(e==='cancel'||CONV.cancelled){CONV.fail='';toast('Conversion cancelled')}else CONV.fail=(e&&e.message||String(e)).replace(/^Error:\s*/,'')+' If it keeps failing, convert the clip to H.264 in your camera app or CapCut and upload that.'}
-  finally{CONV.busy=false;CONV.cancelled=false;rebuild('video',true)}}
+/* one place for both FFmpeg passes: mounts the file, runs, reads the result, and watches for a stuck multi-core run */
+async function ffRun(ff,inPath,args,outName,dur,onQ){let last=performance.now(),stuck=false;const lg=({message})=>{last=performance.now();const m=/time=(\d+):(\d+):([\d.]+)/.exec(message||'');if(m&&onQ)onQ((+m[1]*3600+ +m[2]*60+ +m[3])/dur)};
+  ff.on('log',lg);const dog=setInterval(()=>{if(CONV.mt&&performance.now()-last>60000){stuck=true;try{ff.terminate()}catch(e){}}},5000);
+  try{const rc=await ff.exec(['-hide_banner',...args.slice(0,args.indexOf('-i')),'-i',inPath,...args.slice(args.indexOf('-i')+1),'-y',outName]);if(typeof rc==='number'&&rc!==0)throw new Error('The converter couldn’t read this file (code '+rc+').');
+    const data=await ff.readFile(outName);try{await ff.deleteFile(outName)}catch(e){}const blob=new Blob([data.buffer||data],{type:'video/mp4'});if(!blob.size)throw new Error('The converted file came out empty.');return blob}
+  catch(e){if(stuck){CONV.ff=null;throw new Error('mt-stuck')}throw e}finally{clearInterval(dog);try{ff.off&&ff.off('log',lg)}catch(e){}}}
+async function ffMount(ff){const ext=(VFILE.name.split('.').pop()||'mov').toLowerCase().replace(/[^a-z0-9]/g,'')||'mov';
+  try{try{await ff.createDir('/wrdin')}catch(e){}await ff.mount('WORKERFS',{files:[VFILE]},'/wrdin');return{path:'/wrdin/'+VFILE.name,mounted:true}}
+  catch(e){if(VFILE.size>MEM.info().conv)throw new Error('This file ('+Math.round(VFILE.size/1e6)+' MB) is too big to convert safely on this device. Trim it, or export it as H.264 first.');CONV.msg='Reading your video…';convUI();
+    const path='in.'+ext;await ff.writeFile(path,new Uint8Array(await VFILE.arrayBuffer()));return{path,mounted:false}}}
+async function srcIsAAC(){try{const bx=await topBoxes(VFILE);const mb=bx.find(b=>b.type==='moov');if(!mb)return false;const dv=await readRange(VFILE,mb.off,mb.off+mb.size);const t=audioTrack(dv,{body:8,end:dv.byteLength});return!!(t&&t.fmt==='mp4a'&&t.asc&&(t.asc[0]>>3)===2)}catch(e){return false}}
+/* Convert in up to three steps, fastest first:
+   1. the device's video chip (WebCodecs): usually seconds;
+   2. a quick preview from the keyframes only (about one picture per second) so editing can start right away;
+   3. the smooth full 1080p copy, on every processor core the browser allows. */
+async function convertVideo(auto){if(CONV.busy||!VFILE||!P.video)return;CONV.busy=true;CONV.p=0;CONV.fail='';CONV.stage='hw';CONV.msg='Converting with your device’s video chip…';rebuild('video',true);
+  const key=vidKey(VFILE),dur=P.video.dur||1,stale=()=>!P.video||vidKey(VFILE)!==key;let ff=null,mnt=null;
+  try{let blob=null;
+    try{blob=await convertHW(q=>{CONV.p=clamp(q)*.98;CONV.msg='Converting with your device’s video chip… '+Math.round(clamp(q)*100)+'%';convUI()},()=>CONV.cancelled)}catch(e){if(e==='cancel')throw e;console.warn('video chip conversion failed, using the regular converter',e)}
+    if(CONV.cancelled)throw 'cancel';if(stale())return;
+    if(blob){IDB.put('conv',{key,blob}).catch(()=>{});if(await useConverted(blob))toast('Video converted on your device’s video chip · smooth preview and Video + Text export now use the 1080p copy');return}
+    CONV.stage='load';CONV.p=0;CONV.msg='Loading the converter (one time, about 30 MB)…';rebuild('video',true);
+    const aac=await srcIsAAC(),short=Math.min(1080,Math.min(P.video.w||1080,P.video.h||1080)||1080),scl=n=>`scale='if(gt(iw,ih),-2,${n})':'if(gt(iw,ih),${n},-2)':flags=bicubic,format=yuv420p`;
+    const run=async(args,out,q0,q1,label)=>{for(let attempt=0;attempt<2;attempt++){
+        if(!ff){ff=await loadFF(q=>{CONV.p=Math.max(CONV.p,q*.04);CONV.msg=`Loading the converter… ${Math.round(q*100)}%`;convUI()});mnt=await ffMount(ff)}
+        CONV.t0=performance.now();const onQ=q=>{if(!(q>=0))return;q=clamp(q);CONV.p=q0+(q1-q0)*q;const el=(performance.now()-CONV.t0)/1000,left=q>.03?el/q*(1-q):0;CONV.msg=label+' '+Math.round(q*100)+'%'+(left>1?` · about ${left<90?Math.ceil(left)+' s':Math.ceil(left/60)+' min'} left`:'');convUI()};
+        try{return await ffRun(ff,mnt.path,args,out,dur,onQ)}catch(e){if(e&&e.message==='mt-stuck'&&attempt===0){console.warn('multi-core converter stalled, retrying on one core');FFMT_OFF=true;ff=null;mnt=null;continue}throw e}}};
+    /* quick preview first (skipped if one is already showing) */
+    if(!(P.video.conv&&P.video.conv.quick)){CONV.stage='quick';CONV.msg='Making a quick preview…';rebuild('video',true);
+      try{const qb=await run(['-skip_frame','nokey','-i','-map','0:v:0','-map','0:a:0?','-vf',scl(Math.min(540,short)),'-vsync','vfr','-c:v','libx264','-preset','ultrafast','-crf','26',...(aac?['-c:a','copy']:['-c:a','aac','-b:a','128k']),'-write_tmcd','0','-movflags','+faststart'],'wrd_quick.mp4',.04,.2,'Making a quick preview…');
+        if(stale())return;if(!CONV.cancelled&&qb&&await useConverted(qb,{quick:true}))toast('Quick preview ready · you can start editing while the smooth copy finishes')}
+      catch(e){if(CONV.cancelled)throw 'cancel';console.warn('quick preview failed',e)}}
+    if(CONV.cancelled)throw 'cancel';CONV.stage='full';CONV.msg='Converting…';rebuild('video',true);
+    const full=await run(['-i','-map','0:v:0','-map','0:a:0?','-vf',scl(short),'-c:v','libx264','-preset','ultrafast','-crf','20',...(aac?['-c:a','copy']:['-c:a','aac','-b:a','192k']),'-write_tmcd','0','-movflags','+faststart'],'wrd_out.mp4',P.video.conv&&P.video.conv.quick?.2:.04,.99,'Converting…');
+    if(stale())return;CONV.msg='Finishing…';CONV.p=.99;convUI();IDB.put('conv',{key,blob:full}).catch(()=>{});
+    if(await useConverted(full))toast('Video converted · smooth preview, captions and Video + Text export now use the 1080p copy')}
+  catch(e){console.warn('convert',e);if(e==='cancel'||CONV.cancelled){CONV.fail='';toast('Conversion cancelled')}else CONV.fail=(CONV.stage==='load'?'The converter couldn’t download. Check your internet connection and tap Try converting again.':(e&&e.message||String(e)).replace(/^Error:\s*/,''))+' If it keeps failing, convert the clip to H.264 in your camera app or CapCut and upload that.'}
+  finally{if(mnt&&ff){try{mnt.mounted?await ff.unmount('/wrdin'):await ff.deleteFile(mnt.path)}catch(e){}}CONV.busy=false;CONV.cancelled=false;CONV.stage='';rebuild('video',true)}}
 function cancelConvert(){if(!CONV.busy)return;CONV.cancelled=true;try{CONV.ff&&CONV.ff.terminate()}catch(e){}CONV.ff=null}
+function convTip(){const ua=navigator.userAgent;return /iPhone|iPad/.test(ua)||(/Mac/.test(ua)&&navigator.maxTouchPoints>1)?'Skip this next time: in Blackmagic Camera or other pro apps pick H.264, or HEVC 8-bit (not 4:2:2). iPhone Camera: Settings › Camera › Formats › Most Compatible.'
+  :/Android/.test(ua)?'Skip this next time: set your camera app to H.264 (or “Most compatible”), not HEVC/H.265 10-bit.':'Skip this next time: record or export in H.264 (or 8-bit HEVC 4:2:0). 10-bit 4:2:2 HEVC from pro camera apps is what most browsers can’t read.'}
 function convCard(){const v=P.video;if(!v||v.audioOnly)return null;const cn=CODEC_NAME[v.codec]||v.codec||'';
-  if(v.conv)return h('div',{class:'convcard ok'},h('b',null,'Using your converted copy'),h('small',null,`Preview, caption sync and Video + Text export use the smooth ${v.conv.w}×${v.conv.h} H.264 copy of ${v.name}.`),
+  if(v.conv&&!v.conv.quick&&!CONV.busy)return h('div',{class:'convcard ok'},h('b',null,'Using your converted copy'),h('small',null,`Preview, caption sync and Video + Text export use the smooth ${v.conv.w}×${v.conv.h} H.264 copy of ${v.name}.`),
     h('div',{class:'pillrow'},h('button',{type:'button',class:'pillbtn',onclick:()=>{IDB.del('conv').catch(()=>{});if(VFILE)loadVideo(VFILE,{restore:true,noConv:true})}},'Use the original file instead')));
-  if(!(v.noPreview||v.slowDecode||PROXY.fail||CONV.busy||CONV.fail))return null;
-  const head=v.noPreview?'Your browser can’t show this video’s picture':v.slowDecode?'This camera file plays too slowly to edit smoothly':'Playback trouble with this file';
-  const why=(cn?cn+(/HEVC/.test(cn)?' from a pro camera app (often 10-bit 4:2:2)':'')+' isn’t fully supported by this browser. ':'This format isn’t fully supported by this browser. ')+'Convert it once into a smooth 1080p H.264 copy. Preview, captions and the Video + Text export will use it. It stays on your device.';
+  if(!(v.noPreview||v.slowDecode||PROXY.fail||CONV.busy||CONV.fail||(v.conv&&v.conv.quick)))return null;
+  const quick=!!(v.conv&&v.conv.quick);
+  const head=quick?'Quick preview is on · making the smooth copy':CONV.busy?'Converting your video':v.noPreview?'Your browser can’t show this video’s picture':v.slowDecode?'This camera file plays too slowly to edit smoothly':'Playback trouble with this file';
+  const why=quick?'You can edit, caption and time everything now. The preview shows about one picture per second until the smooth 1080p copy is ready, then it switches over on its own.'
+    :(cn?cn+(/HEVC/.test(cn)?' from a pro camera app (often 10-bit 4:2:2)':'')+' isn’t fully supported by this browser. ':'This format isn’t fully supported by this browser. ')+'WRD makes a smooth 1080p H.264 copy for preview and the Video + Text export. Your sound and captions already work. Everything stays on your device.';
+  const stageHint={hw:'Using your device’s video chip. Usually done in seconds.',load:'Downloading the converter once (about 30 MB).',quick:'Quick preview first, so you can start editing in moments.',full:CONV.mt?'Using every processor core this browser allows. Keep this tab open.':'Keep this tab open. 4K camera files take a few minutes on a computer, longer on a phone.'}[CONV.stage]||'';
   return h('div',{class:'convcard'},h('b',null,head),h('small',null,why),
     CONV.busy?h('div',null,h('small',{id:'convTxt',style:'color:var(--muted);font-size:12px'},CONV.msg),h('div',{class:'vprog'},h('i',{id:'convBar',style:'width:'+Math.round(CONV.p*100)+'%'})),
-        h('p',{class:'hint',style:'margin:6px 0 0'},'Runs in the background. Keep this tab open. 4K camera files take a few minutes on a PC (roughly 10–20 seconds per second of video).'),h('button',{type:'button',class:'pillbtn',onclick:cancelConvert},'Cancel'))
-      :h('button',{type:'button',class:'bigbtn',onclick:convertVideo},'Convert video (one time)'),
+        stageHint?h('p',{class:'hint',style:'margin:6px 0 0'},stageHint):null,h('button',{type:'button',class:'pillbtn',onclick:cancelConvert},'Cancel'))
+      :h('button',{type:'button',class:'bigbtn',onclick:()=>convertVideo()},CONV.fail||quick?'Try converting again':'Convert video'),
     CONV.fail?h('p',{class:'hint',style:'color:#ffb4c2'},CONV.fail):null,
-    h('p',{class:'hint',style:'margin:6px 0 0'},'Tip: set your camera app to H.264 (or 8-bit HEVC) to skip this step next time.'))}
+    h('p',{class:'hint',style:'margin:6px 0 0'},convTip()))}
+/* start converting by itself once the sound is in (no button hunting) */
+function autoConvert(file){setTimeout(()=>{Promise.resolve(AUDIO_P).catch(()=>{}).then(()=>setTimeout(()=>{if(P.video&&VFILE===file&&P.video.noPreview&&!P.video.conv&&!CONV.busy&&!CONV.fail)convertVideo(true)},700))},300)}
 function resetProxy(){if(PROXY.url)URL.revokeObjectURL(PROXY.url);PROXY.url=null;PROXY.key='';PROXY.p=0;PROXY.fail=''}
 const hasMedia=()=>!!(vidURL&&P.video);
 function sizeView(){const [aw,ah]=aspectWH(P.aspect);const r=stage.getBoundingClientRect();const pad=isMob()?14:36;const mw=Math.max(40,r.width-pad*2),mh=Math.max(40,r.height-pad*2);
@@ -4450,9 +4566,9 @@ async function loadVideo(file,o={}){if(!file)return;if(!o.restore){IDB.put('vide
   vidCodec(file).then(cd=>{if(P.video&&P.video.name===file.name&&cd){P.video.codec=cd;rebuild('video',true);if(VPREV==='proxy'&&needsProxy()&&!PROXY.url&&!PROXY.busy)setTimeout(()=>{if(P.video&&P.video.name===file.name&&!PROXY.url)makeProxy()},1500)}});
   if(!o.noConv)IDB.get('conv').then(cv=>{if(cv&&cv.blob&&cv.key===vidKey(file)&&P.video&&P.video.name===file.name)useConverted(cv.blob,{restore:true})}).catch(()=>{});
   if(playable&&!P.video.audioOnly&&!o.noProbe){const myURL=vidURL;probeDecode(myURL).then(r=>{if(!P.video||vidURL!==myURL||P.video.conv)return;
-    if(r===false){P.video.noPreview=true;bgV.pause();bgV.removeAttribute('src');try{bgV.load()}catch(e){}resetProxy();toast('This browser can’t decode this video’s picture. Open Video › Convert video to fix it.');updBg();sizeView();rebuild('video',true)}
+    if(r===false){P.video.noPreview=true;bgV.pause();bgV.removeAttribute('src');try{bgV.load()}catch(e){}resetProxy();toast('This browser can’t show this video’s picture · converting it for you now');updBg();sizeView();rebuild('video',true);if(!o.noConv)autoConvert(file)}
     else if(r==='slow'){P.video.slowDecode=true;rebuild('video',true);if(VPREV==='proxy'&&!PROXY.url&&!PROXY.busy)makeProxy()}})}
-  if(!playable){showVid=false;bgV.removeAttribute('src');toast('This browser can’t show this video’s picture (e.g. ProRes or 10-bit HEVC). Captions, timing and export still work.')}
+  if(!playable){showVid=false;bgV.removeAttribute('src');toast('This browser can’t show this video’s picture (e.g. 10-bit HEVC or ProRes) · converting it for you now. Captions and timing already work.');if(!o.noConv)autoConvert(file)}
   if(!P.video.audioOnly){P.aspect=reduceAspect(w,hh);linkProject()}
   showVid=true;seek(0);setPlaying(false);updAspect();updBg();rebuild('video');changed();
   if(!o.restore)toast(`${file.name} loaded · ${fmtT(dur)}`);
@@ -4460,7 +4576,7 @@ async function loadVideo(file,o={}){if(!file)return;if(!o.restore){IDB.put('vide
   const decMark=()=>{try{localStorage.setItem('wrd.decRun',String(Date.now()))}catch(e){}},decOK=()=>{try{localStorage.removeItem('wrd.decRun')}catch(e){}};
   decMark();AUDIO_P=decodeAudioFile(file).then(ab=>MEM.fit(ab)).then(ab=>{decOK();MEM.note();if(VFILE!==file)return;AUDIO=ab;playBuf=null;WAVE=peaks(ab,4000);waveW=0;updTimeline();updSound();rebuild('video',true)}).catch(e=>{decOK();AUDIO=false;console.warn('audio',e);rebuild('video',true)});
   if(!P.video.noPreview&&!P.video.audioOnly){const key=proxyKey(file);IDB.get('proxy').then(pr=>{if(pr&&pr.blob&&pr.key&&pr.key.startsWith(vidKey(file)+'|')&&vidKey(VFILE)===vidKey(file)){PROXY.url=URL.createObjectURL(pr.blob);PROXY.key=pr.key;applyProxy();rebuild('video',true);if(pr.key!==key&&VPREV==='proxy')setTimeout(()=>{if(proxyKey(VFILE)===key&&PROXY.key!==key&&!PROXY.busy)makeProxy()},1200)}else if(VPREV==='proxy'&&needsProxy()){Promise.resolve(AUDIO_P).catch(()=>{}).then(()=>{if(proxyKey(VFILE)===key&&!PROXY.url)makeProxy()})}}).catch(()=>{})}}
-bgV.addEventListener('error',()=>{if(PROXY.url&&bgV.src!==PROXY.url&&!P.video.conv){showVid=true;VPREV='proxy';applyProxy();rebuild('video',true);return}if(vidURL)toast('This browser can’t show this video’s picture (often 4K HEVC 10-bit or ProRes). Timing, captions and export still work.')});
+bgV.addEventListener('error',()=>{if(PROXY.url&&bgV.src!==PROXY.url&&!P.video.conv){showVid=true;VPREV='proxy';applyProxy();rebuild('video',true);return}if(vidURL){const u0=vidURL;setTimeout(()=>{if(vidURL===u0&&P.video&&!P.video.noPreview&&!P.video.conv&&!CONV.busy)toast('This browser can’t show this video’s picture (often 4K HEVC 10-bit or ProRes). Timing, captions and export still work.')},1500)}});
 /* ---------- audio extraction that works on any browser ----------
    1) MP4/MOV/M4A: read only the audio track straight from the file (no full load):
       AAC → ADTS stream → decodeAudioData (Safari, Chrome, Firefox) or WebCodecs;
@@ -4645,8 +4761,8 @@ function wavBlob(ab){const n=ab.numberOfChannels,sr=ab.sampleRate,len=ab.length,
 let TF=null,ASR=null,ASRKEY='';
 /* open-source Whisper models (OpenAI, MIT license) run on the device through transformers.js.
    fast = Whisper Base · accurate = Whisper Small · best = Whisper Large-v3 Turbo on a computer with a GPU (Small on phones). */
-const MODELS={tiny:'onnx-community/whisper-tiny_timestamped',fast:'onnx-community/whisper-base_timestamped',base:'onnx-community/whisper-small_timestamped',best:'onnx-community/whisper-small_timestamped',turbo:'onnx-community/whisper-large-v3-turbo_timestamped',seg:'Xenova/whisper-base'};
-const MODEL_NAME={tiny:'Whisper Tiny',fast:'Whisper Base',base:'Whisper Small',best:'Whisper Small',turbo:'Whisper Large-v3 Turbo',seg:'Whisper Base (backup)'};
+const MODELS={tiny:'onnx-community/whisper-tiny_timestamped',fast:'onnx-community/whisper-base_timestamped',base:'onnx-community/whisper-small_timestamped',best:'onnx-community/whisper-small_timestamped',turbo:'onnx-community/whisper-large-v3-turbo_timestamped',seg:'Xenova/whisper-base',cloud:'cloud:whisper-large-v3-turbo'};
+const MODEL_NAME={tiny:'Whisper Tiny',fast:'Whisper Base',base:'Whisper Small',best:'Whisper Small',turbo:'Whisper Large-v3 Turbo',seg:'Whisper Base (backup)',cloud:'Whisper Large-v3 Turbo (cloud)'};
 const isMobileUA=()=>/iPhone|iPad|Android/i.test(navigator.userAgent)||(/Mac/.test(navigator.userAgent)&&navigator.maxTouchPoints>1);
 /* Crash-proof speech engine.
    Phones: WebAssembly only (Safari/Chrome on phones close the whole page when a GPU model runs out of memory).
@@ -4675,7 +4791,7 @@ function asrTries(key,G){const tries=[];const mob=isMobileUA();
     tries.push(['wasm',mob?'q8':{encoder_model:'fp32',decoder_model_merged:'q8'}]);if(!mob)tries.push(['wasm','q8'])}
   return tries}
 let ASRLOAD=null;
-async function getASR(key,onp){if(ASRLOAD&&ASRLOAD.key===key){try{await ASRLOAD.p}catch(e){}}
+async function getASR(key,onp){if(key==='cloud')throw new Error('cloud is not a device model');if(ASRLOAD&&ASRLOAD.key===key){try{await ASRLOAD.p}catch(e){}}
   if(ASR&&ASRKEY===key)return ASR;const job={key};job.p=(async()=>{if(useWorker()){try{return await getASRW(key,onp)}catch(e){if(!AW.dead)throw e;console.warn('speech worker unavailable, using the page',e)}}return await getASRMain(key,onp)})();
   ASRLOAD=job;try{return await job.p}finally{if(ASRLOAD===job)ASRLOAD=null}}
 async function getASRMain(key,onp){const G=await gpuInfo();if(ASR&&ASRKEY===key&&!ASR.w)return ASR;if(ASR){try{await ASR.dispose()}catch(e){}ASR=null;ASRKEY=''}const tf=await loadTF();
@@ -4748,7 +4864,7 @@ async function getASRW(key,onp){await awReady();const G=await gpuInfo();const tr
 async function asrRelease(){if(ASR&&ASR.w){ASR=null;ASRKEY='';awKill('released')}else if(ASR){try{await ASR.dispose()}catch(e){}ASR=null;ASRKEY=''}}
 /* get the engine (and on computers the speech model you used last) ready while you set up, so Generate starts straight away */
 let ASRWARM='';
-function asrPrewarm(){try{if(ASRBUSY||UPG.busy||!useWorker()||!hasMedia())return;const mob=isMobileUA();const key=(asrChain()[0]);const tag=key+(mob?'m':'');if(ASRWARM===tag)return;ASRWARM=tag;
+function asrPrewarm(){try{if(ASRBUSY||UPG.busy||!useWorker()||!hasMedia())return;const mob=isMobileUA();const key=(asrChain()[0]);if(key==='cloud')return;const tag=key+(mob?'m':'');if(ASRWARM===tag)return;ASRWARM=tag;
   const idle=window.requestIdleCallback||(f=>setTimeout(f,1200));idle(async()=>{try{await awReady();if(AW.info&&AW.info.auto)awCall('vadwarm').catch(()=>{});
     if(!mob&&asrLevel()===0&&lsGet('wrd.asrUsed','').split(',').includes(key)&&!ASRBUSY){await getASR(key,null);asrEnd()}}catch(e){console.info('prewarm skipped',e&&e.message)}})}catch(e){}}
 
@@ -4941,9 +5057,9 @@ function chunksToWords(ch,key,B){const words=[];(ch||[]).forEach(c=>{const ts=c.
 async function transcribeWith(order,onStatus,audio,wins){const lang=P.cap.lang&&P.cap.lang!=='auto'?(LANGS.find(l=>l[0]===P.cap.lang)||[])[1]:null;let CURK='';
   const prog=d=>{if(d&&d.status==='progress'&&d.total)onStatus(`Downloading ${MODEL_NAME[CURK]||'speech model'} · ${Math.round(d.loaded/d.total*100)}% (first time only)`,d.loaded/d.total);else if(d&&d.status==='ready')onStatus('Model ready',1)};
   let lastErr,bestRes=null;
-  for(const key of order){CURK=key;try{onStatus(`Loading ${MODEL_NAME[key]}…`,0);const asr=await getASR(key,prog);onStatus(`Listening with ${MODEL_NAME[key]}… (on your device)`,-1);
+  for(const key of order){CURK=key;try{let words=[];if(key==='cloud'){words=await cloudListen(wins&&wins.length?wins:cloudWins(audio),P.cap.lang&&P.cap.lang!=='auto'?P.cap.lang:'',onStatus)}else{onStatus(`Loading ${MODEL_NAME[key]}…`,0);const asr=await getASR(key,prog);onStatus(`Listening with ${MODEL_NAME[key]}… (on your device)`,-1);
       const opts=Object.assign({return_timestamps:key==='seg'?true:'word',chunk_length_s:30,stride_length_s:5,task:'transcribe'},lang?{language:lang}:{});
-      asrBegin(key,ASRDT);let words=[];const t0=performance.now();
+      asrBegin(key,ASRDT);const t0=performance.now();
       if(wins&&wins.length&&key!=='seg'){const tot=wins.reduce((t,B)=>t+B.speech,0)||1;let done=0;
         for(let wi=0;wi<wins.length;wi++){const B=wins[wi];onStatus(`Listening with ${MODEL_NAME[key]}… ${Math.round(done/tot*100)}%`,done/tot);if(!asr.w)await yieldUI();
           let o=await asr(B.audio,opts);let ws=chunksToWords(o&&o.chunks,key,B);
@@ -4952,13 +5068,13 @@ async function transcribeWith(order,onStatus,audio,wins){const lang=P.cap.lang&&
           words.push(...ws);done+=B.speech}
         console.info('ASR',key,wins.length,'packed windows,',Math.round(tot),'s of speech in',Math.round(performance.now()-t0),'ms')}
       else{if(!asr.w)await yieldUI();const out=await asr(audio,opts);words=chunksToWords(out&&out.chunks,key,null)}
-      asrEnd();
+      asrEnd();}
       words=words.filter(w=>w.w&&isFinite(w.s));{const dur=audio.length/16000;const sg=SILERO&&SILERO.a===audio?SILERO.segs:vadSegs(audio).segs;try{words=speechAlign(words,sg,dur)}catch(e){console.warn('speechAlign',e);words.sort((a,b)=>a.s-b.s)}}words=dropHallucinations(words,audio);
       if(!words.length){lastErr=new Error('No speech found');continue}
       const sc=asrScore(words,audio);console.info('ASR',key,ASRDT,'score',sc.toFixed(2),words.length,'words');
       if(!bestRes||sc>bestRes.sc)bestRes={sc,words,key};
-      if(sc>=.8)break;onStatus('Double-checking with a stronger model…',-1)}
-    catch(e){asrEnd();console.warn('ASR',key,e);lastErr=e}}
+      if(sc>=.8||key==='cloud')break;onStatus('Double-checking with a stronger model…',-1)}
+    catch(e){asrEnd();console.warn('ASR',key,e);lastErr=e;if(key==='cloud'){CAPINFO.cloudMsg=e.message;try{toast(e.cloud==='net'?'Can’t reach cloud captions · using on-device captions':e.message.replace(/\.\s*$/,'')+(e.message.indexOf('on-device')<0?' · using on-device captions':''))}catch(_){}}}}
   /* phones: free the model's memory right away so editing and export stay smooth */
   if(isMobileUA())await asrRelease();
   if(bestRes){try{const u=lsGet('wrd.asrUsed','').split(',').filter(Boolean);if(!u.includes(bestRes.key)){u.push(bestRes.key);lsSet('wrd.asrUsed',u.slice(-4).join(','))}}catch(e){}}
@@ -4980,11 +5096,66 @@ function vidK(a16){try{const ad=a16.length/16000,vd=P.video&&P.video.dur;if(vd&&
 function finishWords(words,audio,onStatus){if(P.cap.smart){onStatus&&onStatus('Audio sync · matching words to the voice…',-1);const r=audioSync(words,audio);words=r.words;CAPINFO.lag=r.lag}
   const k=vidK(audio);if(k!==1)words.forEach(w=>{w.s*=k;w.e*=k});
   return fixVocab(words)}
-async function strongKey(){const G=await gpuInfo();return G.ok&&G.turbo?'turbo':(isMobileUA()&&asrLevel()>0?'fast':'best')}
+/* ===== Cloud captions: Whisper Large-v3 Turbo on Cloudflare (wrdmotion.com/api/captions) =====
+   Phones send only the packed speech (16 kHz mono, a few seconds at a time) and get timed words back, so even small phones get
+   Turbo accuracy with no memory risk. Every license has a daily minute cap; offline, capped or busy → on-device captions. */
+const CCAP={off:0,why:'',u:null,at:0};
+const CLOUD_API=(location.protocol==='https:'&&!/github\.io$/.test(location.hostname)?'':'https://wrdmotion.com')+'/api/captions';
+function cloudReady(){try{return !!(window.WRD_CLOUD&&WRD_CLOUD.token&&navigator.onLine!==false&&(!P||!P.cap||P.cap.cloud!==false)&&!(CCAP.off&&Date.now()<CCAP.off))}catch(e){return false}}
+function cloudPause(code,u){const reset=u&&u.resetsIn?u.resetsIn*1000:6*36e5;CCAP.off=Date.now()+(code==='cap'||code==='quota'||code==='blocked'||code==='auth'?reset:code==='setup'||code==='off'?30*6e4:2*6e4);CCAP.why=code}
+async function cloudFetch(opt,ms){const ac=typeof AbortController!=='undefined'?new AbortController():null;const tm=ac?setTimeout(()=>ac.abort(),ms||60000):0;
+  try{const tok=await WRD_CLOUD.token();const r=await fetch(CLOUD_API,Object.assign({cache:'no-store',signal:ac&&ac.signal},opt,{headers:Object.assign({'x-wrd-token':tok},opt&&opt.headers||{})}));
+    let j=null;try{j=await r.json()}catch(e){}if(!j)j={ok:false,code:'net',error:'No answer from the cloud'};j.status=r.status;return j}
+  catch(e){return{ok:false,code:'net',error:'No connection to the cloud',status:0}}finally{if(tm)clearTimeout(tm)}}
+async function cloudUsage(force){if(!window.WRD_CLOUD)return null;if(!force&&CCAP.u&&Date.now()-CCAP.at<60000)return CCAP.u;const j=await cloudFetch({method:'GET'},12000);
+  if(j&&j.ok){CCAP.u=j;CCAP.at=Date.now();if(CCAP.why==='cap'&&!(j.leftMin===0)){CCAP.off=0;CCAP.why=''}}else if(j&&j.fallback)cloudPause(j.code,j);return j}
+function cloudMeterText(u){if(!window.WRD_CLOUD)return '';if(navigator.onLine===false)return 'Offline · captions run on this device';if(!u)return 'Checking cloud minutes…';
+  if(!u.ok)return u.code==='cap'?'Today’s cloud minutes are used up · on-device captions until they reset':u.code==='net'?'Can’t reach the cloud right now · on-device captions':(u.error||'Cloud captions unavailable')+' · on-device captions';
+  if(u.leftMin==null)return 'Cloud captions · unlimited minutes';const h=Math.max(1,Math.round((u.resetsIn||0)/3600));
+  return u.leftMin<=0?'Today’s cloud minutes are used up · they reset in about '+h+' h':'Cloud captions · '+(Math.round(u.leftMin*10)/10)+' of '+u.capMin+' min left today'}
+function cloudMeterPaint(){const el=document.getElementById('cloudMeter');if(!el)return;el.textContent=cloudMeterText(CCAP.u);if(window.WRD_CLOUD&&navigator.onLine!==false&&(!CCAP.u||Date.now()-CCAP.at>60000))cloudUsage().then(u=>{const e2=document.getElementById('cloudMeter');if(e2)e2.textContent=cloudMeterText(u)})}
+/* 16 kHz Float32 → 16-bit WAV → base64 (done by the browser, off the main path) */
+function wavBlob(f32){const n=f32.length,b=new ArrayBuffer(44+n*2),v=new DataView(b);const W=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+  W(0,'RIFF');v.setUint32(4,36+n*2,true);W(8,'WAVE');W(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,16000,true);v.setUint32(28,32000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);W(36,'data');v.setUint32(40,n*2,true);
+  let pk=0;for(let i=0;i<n;i++){const a=Math.abs(f32[i]);if(a>pk)pk=a}const g=pk>0&&pk<.25?Math.min(4,.5/pk):1;
+  for(let i=0;i<n;i++){let x=f32[i]*g;x=x<-1?-1:x>1?1:x;v.setInt16(44+i*2,x<0?x*32768:x*32767,true)}return new Blob([b],{type:'audio/wav'})}
+function blobB64(bl){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>{const s=String(fr.result||'');res(s.slice(s.indexOf(',')+1))};fr.onerror=()=>rej(fr.error||new Error('read'));fr.readAsDataURL(bl)})}
+/* no speech windows (very long clips) → plain 27 s pieces cut at quiet moments */
+function cloudWins(a16){const sr=16000,dur=a16.length/sr,W=[];let a=0;while(a<dur-.05){let b=Math.min(dur,a+PACK_MAX);if(b<dur)b=quietAt(a16,a+PACK_MAX*.65,a+PACK_MAX-.3);
+    const audio=a16.slice(Math.floor(a*sr),Math.ceil(b*sr));W.push({audio,map:[{s:a,e:b,d:0}],len:b-a,speech:b-a});a=b}return W}
+function cloudErr(code,msg){const e=new Error(msg);e.cloud=code;return e}
+async function cloudListen(wins,lang,onStatus){const tot=wins.reduce((t,B)=>t+B.audio.length/16000,0);if(!tot)return[];
+  onStatus('Connecting to Whisper Large-v3 Turbo (cloud)…',-1);
+  const u=await cloudUsage(true);if(!u||!u.ok){const c=u&&u.code||'net';if(u&&u.fallback)cloudPause(c,u);else if(c==='net')cloudPause('net');throw cloudErr(c,cloudMeterText(u))}
+  if(u.leftMin!=null&&u.leftMin*60<tot*.85){throw cloudErr('cap','Not enough cloud minutes left today ('+(Math.round(u.leftMin*10)/10)+' min) for this clip · using on-device captions')}
+  const prompt=encodeURIComponent((P.cap.vocab||'').split(/[,\n;]+/).map(x=>x.trim()).filter(Boolean).join(', ').slice(0,280));
+  const out=new Array(wins.length);let done=0,next=0,fail=null;
+  const one=async i=>{const B=wins[i];const body=await blobB64(wavBlob(B.audio));let j=null;
+    for(let t=0;t<3;t++){j=await cloudFetch({method:'POST',headers:{'content-type':'text/plain','x-wrd-lang':lang||'','x-wrd-prompt':prompt},body},Math.max(45000,B.audio.length/16000*4000));
+      if(j.ok||j.fallback||(j.status>=400&&j.status<500))break;await new Promise(r=>setTimeout(r,700*(t+1)))}
+    if(!j.ok){throw cloudErr(j.code||'ai',j.error||'Cloud captions failed')}
+    if(j.leftMin!=null){CCAP.u=Object.assign({},CCAP.u||{},{ok:true,leftMin:j.leftMin,capMin:j.capMin,usedMin:j.usedMin,resetsIn:j.resetsIn});CCAP.at=Date.now()}
+    out[i]=(j.words||[]).map(w=>{let s0=+w.s||0,e0=+w.e||s0+.3;if(e0<s0+.05)e0=s0+.05;return{w:String(w.w||'').trim(),s:unpackT(B,s0,false),e:unpackT(B,e0,true)}}).filter(w=>w.w);
+    done+=B.audio.length/16000;onStatus('Listening with Whisper Large-v3 Turbo (cloud)… '+Math.round(done/tot*100)+'%',done/tot)};
+  const lane=async()=>{while(!fail&&next<wins.length){const i=next++;try{await one(i)}catch(e){fail=fail||e}}};
+  onStatus('Listening with Whisper Large-v3 Turbo (cloud)… 0%',0);
+  await Promise.all([lane(),lane(),lane()]);
+  if(fail){if(['cap','quota','blocked','auth','setup','off'].includes(fail.cloud))cloudPause(fail.cloud,CCAP.u);else cloudPause('net');throw fail}
+  console.info('ASR cloud',wins.length,'pieces,',Math.round(tot),'s of audio');return out.flat()}
+function capModelHint(m){const mob=isMobileUA(),cl=!!window.WRD_CLOUD&&P.cap.cloud!==false,gpu=GPUINFO&&GPUINFO.ok&&GPUINFO.turbo;setTimeout(cloudMeterPaint,0);
+  if(mob){if(m==='fast')return 'Whisper Base on your phone · captions in seconds'+(cl?', then WRD re-listens with Whisper Large-v3 Turbo in the cloud and swaps in the better words, keeping your style.':'.');
+    return cl?'Whisper Large-v3 Turbo in the cloud · top accuracy in seconds on any phone, no big download. Uses your daily cloud minutes; offline it switches to Whisper Base on your phone.':'Whisper Base on your phone. Bigger models don’t fit in a phone browser’s memory, so Accurate and Best use the cloud when you’re signed in to WRD Creator and online.'}
+  if(m==='fast')return 'Whisper Base · captions in seconds, then WRD quietly re-listens with a stronger model'+(gpu?' (Turbo on your graphics card)':cl?' (Turbo in the cloud)':' (Whisper Small)')+' and swaps in the better words, keeping your style.';
+  if(m==='base')return 'Whisper Small on your computer (~250 MB once)'+(cl?'. If the result looks off, WRD double-checks with Turbo in the cloud.':'.');
+  return gpu?'Whisper Large-v3 Turbo on your graphics card (~1.3 GB once), the most accurate'+(cl?', with the cloud as backup.':'.'):cl?'Whisper Large-v3 Turbo in the cloud · the most accurate, in seconds. Uses your daily cloud minutes; offline it uses Whisper Small on your computer.':'Whisper Small on this computer. Turbo needs a graphics card, or the cloud in WRD Creator.'}
+async function strongKey(){const G=await gpuInfo();const cl=cloudReady();if(G.ok&&G.turbo)return 'turbo';if(isMobileUA())return cl?'cloud':'fast';return cl?'cloud':'best'}
 let AUDIO16=null;
 /* models to try in order for the chosen mode */
-function asrChain(strong){const pick=P.cap.model||'base',lv=asrLevel(),mob=isMobileUA();if(!strong)strong=GPUINFO&&GPUINFO.ok&&GPUINFO.turbo?'turbo':(mob&&lv>0?'fast':'best');
-  return lv>=2||(mob&&lv>=1)?['fast','tiny']:({fast:['fast','tiny'],base:['base',strong,'fast'],best:[strong,'base','fast']}[pick]||['base','fast'])}
+function asrChain(strong){const pick=P.cap.model||'base',lv=asrLevel(),mob=isMobileUA(),cl=cloudReady();if(!strong)strong=GPUINFO&&GPUINFO.ok&&GPUINFO.turbo?'turbo':(mob?(cl?'cloud':'fast'):(cl?'cloud':'best'));
+  /* phones never load the big models on the device (that's what closed the page): Accurate and Best use the cloud, otherwise Whisper Base */
+  if(mob||lv>=2)return pick!=='fast'&&cl?['cloud','fast','tiny']:['fast','tiny'];
+  const extra=cl&&strong!=='cloud'?'cloud':null;
+  return ({fast:['fast','tiny'],base:['base',strong,'fast'],best:[strong,extra,'base','fast']}[pick]||['base','fast']).filter((k,i,a)=>k&&a.indexOf(k)===i)}
 async function transcribe(onStatus){
   if(!AUDIO)throw new Error('The audio isn’t ready yet. Give it a second after adding the video.');
   onStatus('Preparing audio…',-1);if(useWorker()){try{await awReady()}catch(e){}}const audio=await prepAudio(AUDIO);AUDIO16={src:AUDIO,a:audio,w:null};SILERO=null;
@@ -5781,7 +5952,8 @@ function buildVideo(){const p=h('div',{class:'panel'});const C=P.cap;
   p.append(sec('Auto captions',
     (()=>{const sl=h('select',{class:'txtin exsel',id:'langSel','aria-label':'Spoken language'},h('option',{value:'auto'},'Detect automatically'),...LANGS.map(([c_,n_,nat])=>h('option',{value:c_},nat+(nat.toLowerCase()===n_?'':' · '+n_[0].toUpperCase()+n_.slice(1)))));sl.value=C.lang||'auto';sl.addEventListener('change',()=>{C.lang=sl.value;changed({tl:false})});
       return h('div',{class:'ctl'},h('div',{class:'ctl-h'},h('label',{for:'langSel'},'Language'),h('output',null,LANGS.length+' languages')),sl)})(),
-    h('div',{class:'ctl'},h('div',{class:'ctl-h'},h('label',null,'Speech model')),seg([{v:'fast',label:'Fast'},{v:'base',label:'Accurate'},{v:'best',label:'Best'}],()=>C.model,v=>{C.model=v;setTimeout(()=>rebuild('video',true),0)},{label:'Speech model'}),h('p',{class:'hint'},{fast:'Whisper Base · captions in seconds, then WRD quietly re-listens with a stronger model (Turbo on computers with a graphics card, Small on phones) and swaps in the better words, keeping your style.',base:'Whisper Small · accurate on phones and computers (~250 MB once; ~120 MB on phones).',best:'Whisper Large-v3 Turbo on computers with a graphics card (~1.3 GB once), the most accurate. On phones Best uses Whisper Small: phone browsers don’t have the memory for Turbo and would close the page.'}[C.model])),
+    h('div',{class:'ctl'},h('div',{class:'ctl-h'},h('label',null,'Speech model')),seg([{v:'fast',label:'Fast'},{v:'base',label:'Accurate'},{v:'best',label:'Best'}],()=>C.model,v=>{C.model=v;setTimeout(()=>rebuild('video',true),0)},{label:'Speech model'}),h('p',{class:'hint'},capModelHint(C.model)),window.WRD_CLOUD?h('p',{class:'hint cloudm',id:'cloudMeter'},cloudMeterText(CCAP.u)):null),
+    window.WRD_CLOUD?toggle('Cloud captions (Whisper Large-v3 Turbo)',()=>P.cap.cloud!==false,v=>{P.cap.cloud=v;setTimeout(()=>rebuild('video',true),0)},{opts:{tl:false}}):null,
     asrLevel()>0?h('div',{class:'upgbox'},h('span',null,'Safe mode is on: WRD uses a lighter speech setup because this device ran out of memory last time.'),h('button',{type:'button',class:'pillbtn',onclick:()=>{lsSet('wrd.asrSafe','0');GPUINFO=null;TF=TF;rebuild('video',true);toast('Full speech setup is back on')}},'Turn off')):null,
     C.model==='fast'?toggle('Upgrade Fast captions in the background',()=>P.cap.upgrade!==false,v=>{P.cap.upgrade=v},{opts:{tl:false}}):null,
     UPG.busy?h('div',{class:'upgbox busy'},h('i'),h('span',{id:'upgStatus'},'Improving accuracy in the background…')):null,
@@ -5987,10 +6159,10 @@ function exportDims0(res){if(res==='video'&&P.video&&!P.video.audioOnly){const v
   if(res==='video')res=1080;const [aw,ah]=aspectWH(P.aspect);let w,h_;if(aw<=ah){w=res;h_=res*ah/aw}else{h_=res;w=res*aw/ah}return[even(w),even(h_)]}
 let isExporting=false,cancelEx=false,lastBlob=null,lastName='';
 function exView(v){$('#exSetup').hidden=v!=='setup';$('#exRun').hidden=v!=='run';$('#exDone').hidden=v!=='done'}
-const hasFullSrc=()=>!!(P.video&&vidURL&&(P.video.audioOnly||!P.video.noPreview));
+const hasFullSrc=()=>!!(P.video&&vidURL&&(P.video.audioOnly||!P.video.noPreview)&&!(P.video.conv&&P.video.conv.quick));
 function openExport(){if(!EX._picked){let f=null;try{f=localStorage.getItem('wrd.exfmt')}catch(e){}EX.fmt=hasFullSrc()?(f&&FMTS.some(x=>x.id===f)?f:'full'):(f&&f!=='full'&&FMTS.some(x=>x.id===f)?f:'mp4')}if(EX.fmt==='full'&&!hasFullSrc())EX.fmt='mp4';EX.bg=structuredClone(P.bg);if(EX.fmt==='mp4'&&EX.bg.mode==='transparent')EX.bg={mode:recommendKey(S).mode,color:P.bg.color};if(P.video&&!P.video.audioOnly)EX.res='video';else if(EX.res==='video')EX.res=1080;buildEx();exView('setup');$('#exModal').hidden=false;setPlaying(false)}
 function buildEx(){
-  $('#fmtGrid').replaceChildren(...FMTS.map(f=>h('button',{type:'button',class:'fmt'+(f.needVid?' fmt-full':''),style:`--c:${f.c}`,'aria-pressed':String(EX.fmt===f.id),'aria-disabled':String(!!(f.needVid&&!hasFullSrc())),onclick:()=>{if(f.needVid&&!hasFullSrc()){toast(P.video&&P.video.noPreview?'This browser can’t read this video’s picture. Convert it to H.264 MP4 to burn the text in.':'Add your video in the Video tab first, then export it with the text on top');return}EX.fmt=f.id;EX._picked=true;try{localStorage.setItem('wrd.exfmt',f.id)}catch(e){}if(f.id==='clips'&&EX.cf==='webm')EX.bg={mode:'transparent',color:EX.bg.color||'#00ff00'};if(f.id==='mov')EX.bg={mode:'transparent',color:EX.bg.color||'#00ff00'};if(f.id==='mp4'&&EX.bg.mode==='transparent')EX.bg={mode:recommendKey(S).mode,color:EX.bg.color||'#00ff00'};buildEx()}},h('span',{class:'badge'},f.badge),h('b',null,f.name),h('small',null,f.sub))));
+  $('#fmtGrid').replaceChildren(...FMTS.map(f=>h('button',{type:'button',class:'fmt'+(f.needVid?' fmt-full':''),style:`--c:${f.c}`,'aria-pressed':String(EX.fmt===f.id),'aria-disabled':String(!!(f.needVid&&!hasFullSrc())),onclick:()=>{if(f.needVid&&!hasFullSrc()){toast(P.video&&P.video.conv&&P.video.conv.quick?'Your smooth video copy is still being made · Video + Text export unlocks as soon as it’s done':P.video&&P.video.noPreview?'This browser can’t read this video’s picture. Convert it to H.264 MP4 to burn the text in.':'Add your video in the Video tab first, then export it with the text on top');return}EX.fmt=f.id;EX._picked=true;try{localStorage.setItem('wrd.exfmt',f.id)}catch(e){}if(f.id==='clips'&&EX.cf==='webm')EX.bg={mode:'transparent',color:EX.bg.color||'#00ff00'};if(f.id==='mov')EX.bg={mode:'transparent',color:EX.bg.color||'#00ff00'};if(f.id==='mp4'&&EX.bg.mode==='transparent')EX.bg={mode:recommendKey(S).mode,color:EX.bg.color||'#00ff00'};buildEx()}},h('span',{class:'badge'},f.badge),h('b',null,f.name),h('small',null,f.sub))));
   let opts=[{v:720,label:'720p'},{v:1080,label:'1080p'},{v:1440,label:'2K'},{v:2160,label:'4K'}];if(P.video&&!P.video.audioOnly)opts.unshift({v:'video',label:'Match video'});
   if(licCap()){opts=opts.map(o=>o.v==='video'||o.v<=licCap()?o:Object.assign({},o,{html:'<span class="icl">'+o.label+svg('lock',2)+'</span>'}));if(EX.res!=='video'&&EX.res>licCap())EX.res=720}
   $('#resSeg').replaceChildren(seg(opts,()=>EX.res,v=>{if(licCap()&&v!=='video'&&v>licCap()){toast('Free trial exports up to 720p. Message @wrdmotion for a full license to unlock 1080p, 2K and 4K.');buildEx();return}EX.res=v;exMeta()},{label:'Resolution',opts:{tl:false}}));
