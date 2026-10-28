@@ -1316,6 +1316,7 @@ body.capbar .toast{bottom:auto;top:calc(64px + env(safe-area-inset-top,0px));tra
 .vcard{display:flex;flex-direction:column;gap:3px;padding:12px;border-radius:12px;border:1px solid var(--line2);background:#080a0f}.vcard b{font-size:13px;word-break:break-all}.vcard small{color:var(--muted);font-family:var(--f-mono);font-size:11px}
 .stat{display:grid;grid-template-columns:1fr 1fr;gap:8px}.stat div{background:#080a0f;border:1px solid var(--line);border-radius:10px;padding:9px 10px}.stat b{display:block;font-family:var(--f-display);font-weight:900;font-size:17px;letter-spacing:-.02em}.stat small{color:var(--muted);font-size:11px}
 .rec{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line2);background:#090b11}.rec div{flex:1;min-width:0}.rec b{display:block;font-size:13px}.rec small{color:var(--muted);font-size:11.5px}
+.mobnote{display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:12px;border:1px solid rgba(122,140,255,.35);background:linear-gradient(135deg,rgba(61,123,255,.10),rgba(180,77,255,.08));margin:10px 0}.mobnote b{display:block;font-size:14px;margin-bottom:4px}.mobnote small{display:block;color:var(--muted);font-size:12.5px;line-height:1.45;margin-bottom:8px}.mobnote-i{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:rgba(122,140,255,.18);color:#aab6ff}.mobnote-i svg{width:20px;height:20px}
 .convcard{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;border:1px solid rgba(255,207,138,.35);background:rgba(255,207,138,.06);margin:10px 0}
 .convcard.ok{border-color:rgba(92,240,168,.35);background:rgba(92,240,168,.06)}
 .convcard b{font-size:13px}.convcard small{color:var(--muted);font-size:12px;line-height:1.45}
@@ -2964,7 +2965,7 @@ function styleOnto(ns,old){ns.lines=old.lines.map((L,i)=>{const src=ns.lines[Mat
 const $=s=>document.querySelector(s);
 function h(tag,props,...kids){const el=document.createElement(tag);if(props)for(const k in props){const v=props[k];if(v==null||v===false)continue;if(k==='class')el.className=v;else if(k==='style')el.style.cssText=v;else if(k==='html')el.innerHTML=v;else if(k.startsWith('on'))el.addEventListener(k.slice(2),v);else el.setAttribute(k,v===true?'':v)}
   for(const kid of kids.flat())if(kid!=null&&kid!==false)el.append(kid.nodeType?kid:document.createTextNode(String(kid)));return el}
-const ICON={arrU:'<path d="M12 19V5M6 11l6-6 6 6"/>',arrD:'<path d="M12 5v14M6 13l6 6 6-6"/>',arrL:'<path d="M19 12H5M11 6l-6 6 6 6"/>',arrR:'<path d="M5 12h14M13 6l6 6-6 6"/>',
+const ICON={monitor:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',arrU:'<path d="M12 19V5M6 11l6-6 6 6"/>',arrD:'<path d="M12 5v14M6 13l6 6 6-6"/>',arrL:'<path d="M19 12H5M11 6l-6 6 6 6"/>',arrR:'<path d="M5 12h14M13 6l6 6-6 6"/>',
  chevL:'<path d="M15 5l-7 7 7 7"/>',chevR:'<path d="M9 5l7 7-7 7"/>',
  ctrH:'<path d="M12 4v16"/><path d="M3 12h5M5.5 9.5 8 12l-2.5 2.5M21 12h-5M18.5 9.5 16 12l2.5 2.5"/>',ctrV:'<path d="M4 12h16"/><path d="M12 3v5M9.5 5.5 12 8l2.5-2.5M12 21v-5M9.5 18.5 12 16l2.5 2.5"/>',
  spark:'<path d="M12 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7z"/>',nope:'<circle cx="12" cy="12" r="8"/><path d="M6.5 17.5l11-11"/>',
@@ -3979,13 +3980,18 @@ function setProxyRes(r){lsSet('wrd.pres',r);if(VPREV!=='proxy'){VPREV='proxy';tr
   /* the current preview keeps playing until the new size is ready; falling back to the original would go black on files this browser can't show */
   PROXY.fail='';toast('Building the '+(r==='540'?'Light':r+'p')+' preview · your current preview keeps playing');makeProxy();rebuild('video',true)}
 const vT=t=>proxyOn()?t*PROXY.k:t;
+/* iPhone/iPad Safari won't draw a video's picture until it has played once: play it silently for a moment, then pause */
+function primeVid(){if(!isMobileUA()||!bgV||!vidURL)return;const go=()=>{if(playing||!vidOn())return;const was=bgV.muted;bgV.muted=true;let p;try{p=bgV.play()}catch(e){bgV.muted=was;return}
+  const done=()=>{if(!playing){try{bgV.pause()}catch(e){}try{bgV.currentTime=vT(T)}catch(e){}}bgV.muted=was;dirty=true};
+  if(p&&p.then)p.then(()=>setTimeout(done,120)).catch(()=>{bgV.muted=was});else setTimeout(done,120)};
+  if(bgV.readyState>=1)go();else bgV.addEventListener('loadedmetadata',go,{once:true})}
 const proxyOn=()=>!!(PROXY.url&&VPREV==='proxy'&&vidOn());
 const vidKey=f=>f?[f.name,f.size,f.lastModified||0].join('|'):'';
 /* build a light preview for anything that's heavy to decode: big frames, high bitrate, pro codecs, slow decoding */
 const HEAVYC=new Set(['hvc1','hev1','dvh1','dvhe','apcn','apch','apcs','apco','ap4h','ap4x','av01']);
 function needsProxy(){const v=P.video;if(!v||v.audioOnly||v.noPreview)return false;const m=Math.max(v.w||0,v.h||0);const mbps=v.size&&v.dur?v.size*8/v.dur/1e6:0;
   return m>(isMob()?1280:1920)||mbps>(isMob()?12:30)||HEAVYC.has(v.codec)||!!v.slowDecode}
-function applyProxy(){if(!vidURL)return;const want=proxyOn()?PROXY.url:vidURL;if(bgV.src!==want){const t=T,pl=playing;bgV.src=want;bgV.muted=proxyOn();bgV.addEventListener('loadedmetadata',()=>{PROXY.k=proxyOn()&&P.video&&P.video.dur&&isFinite(bgV.duration)&&Math.abs(bgV.duration/P.video.dur-1)<.08?bgV.duration/P.video.dur:1;try{bgV.currentTime=vT(t)}catch(e){}if(pl&&vidOn())bgV.play().catch(()=>{})},{once:true})}else bgV.muted=proxyOn();
+function applyProxy(){if(!vidURL)return;const want=proxyOn()?PROXY.url:vidURL;if(bgV.src!==want){const t=T,pl=playing;bgV.src=want;bgV.muted=proxyOn();bgV.addEventListener('loadedmetadata',()=>{PROXY.k=proxyOn()&&P.video&&P.video.dur&&isFinite(bgV.duration)&&Math.abs(bgV.duration/P.video.dur-1)<.08?bgV.duration/P.video.dur:1;try{bgV.currentTime=vT(t)}catch(e){}if(pl&&vidOn())bgV.play().catch(()=>{});else primeVid()},{once:true})}else bgV.muted=proxyOn();
   if(playing){if(audOn())startAudio();else stopAudio()}updSound();dirty=true}
 async function makeProxy(){if(PROXY.busy||!VFILE||!P.video||P.video.audioOnly||P.video.noPreview)return;
   const mt=['video/mp4;codecs=avc1.42E01F','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(m=>{try{return window.MediaRecorder&&MediaRecorder.isTypeSupported(m)}catch(e){return false}});
@@ -4042,7 +4048,7 @@ async function useConverted(blob,o={}){const url=URL.createObjectURL(blob);const
   if(!ok||!P.video){URL.revokeObjectURL(url);if(!o.restore)toast('The converted copy couldn’t be opened. Try converting again.');return false}
   if(vidURL)URL.revokeObjectURL(vidURL);vidURL=url;resetProxy();Object.assign(P.video,{noPreview:false,slowDecode:false,conv:{w,h:hh,quick:!!o.quick}});showVid=true;
   bgV.src=vidURL;bgV.muted=false;await new Promise(r=>{bgV.addEventListener('loadedmetadata',r,{once:true});setTimeout(r,4000)});try{bgV.currentTime=T}catch(e){}
-  applyProxy();updBg();sizeView();rebuild('video',true);changed({tl:false});return true}
+  applyProxy();primeVid();updBg();sizeView();rebuild('video',true);changed({tl:false});return true}
 const FFV=['0.12.15','0.12.10'],FFCORE='0.12.10',FFCDN=['https://unpkg.com','https://cdn.jsdelivr.net/npm'];
 /* ===== fast conversion on the device's video chip (WebCodecs) =====
    Reads the camera file's own samples (no big library), decodes them with the hardware decoder when the browser has one
@@ -4183,6 +4189,11 @@ async function convertVideo(auto){if(CONV.busy||!VFILE||!P.video)return;CONV.bus
   catch(e){console.warn('convert',e);if(e==='cancel'||CONV.cancelled){CONV.fail='';toast('Conversion cancelled')}else CONV.fail=(CONV.stage==='load'?'The converter couldn’t download. Check your internet connection and tap Try converting again.':(e&&e.message||String(e)).replace(/^Error:\s*/,''))+' If it keeps failing, convert the clip to H.264 in your camera app or CapCut and upload that.'+(CONV.hwWhy?' (video chip: '+CONV.hwWhy+')':'')}
   finally{if(mnt&&ff){try{mnt.mounted?await ff.unmount('/wrdin'):await ff.deleteFile(mnt.path)}catch(e){}}CONV.busy=false;CONV.cancelled=false;CONV.stage='';rebuild('video',true)}}
 function cancelConvert(){if(!CONV.busy)return;CONV.cancelled=true;try{CONV.ff&&CONV.ff.terminate()}catch(e){}CONV.ff=null}
+/* phones: a one-time, friendly heads-up that a computer is the most powerful way to use WRD */
+function mobNote(){if(!isMobileUA())return null;try{if(localStorage.getItem('wrd.mobNote')==='1')return null}catch(e){}
+  return h('div',{class:'mobnote'},h('div',{class:'mobnote-i',html:svg('monitor',1.6)}),h('div',null,h('b',null,'WRD is most powerful on a computer'),
+    h('small',null,'On a Mac or PC, WRD runs at full speed: big 4K camera files, fast exports and every caption model on your device. WRD works on phones too, and we’re optimizing it with every update. For long or 4K videos, a computer gives the smoothest ride.'),
+    h('button',{type:'button',class:'pillbtn',onclick:e=>{try{localStorage.setItem('wrd.mobNote','1')}catch(_){}e.target.closest('.mobnote').remove()}},'Got it')))}
 function convTip(){const ua=navigator.userAgent;return /iPhone|iPad/.test(ua)||(/Mac/.test(ua)&&navigator.maxTouchPoints>1)?'Skip this next time: in Blackmagic Camera or other pro apps pick H.264, or HEVC 8-bit (not 4:2:2). iPhone Camera: Settings › Camera › Formats › Most Compatible.'
   :/Android/.test(ua)?'Skip this next time: set your camera app to H.264 (or “Most compatible”), not HEVC/H.265 10-bit.':'Skip this next time: record or export in H.264 (or 8-bit HEVC 4:2:0). 10-bit 4:2:2 HEVC from pro camera apps is what most browsers can’t read.'}
 function convCard(){const v=P.video;if(!v||v.audioOnly)return null;const cn=CODEC_NAME[v.codec]||v.codec||'';
@@ -4575,7 +4586,7 @@ async function loadVideo(file,o={}){if(!file)return;if(!o.restore){IDB.put('vide
   if(!P.video.audioOnly){P.aspect=reduceAspect(w,hh);linkProject()}
   showVid=true;seek(0);setPlaying(false);updAspect();updBg();rebuild('video');changed();
   if(!o.restore)toast(`${file.name} loaded · ${fmtT(dur)}`);
-  if(vidOn()){try{bgV.currentTime=.04}catch(e){}}
+  if(vidOn()){try{bgV.currentTime=.04}catch(e){}primeVid()}
   const decMark=()=>{try{localStorage.setItem('wrd.decRun',String(Date.now()))}catch(e){}},decOK=()=>{try{localStorage.removeItem('wrd.decRun')}catch(e){}};
   decMark();AUDIO_P=decodeAudioFile(file).then(ab=>MEM.fit(ab)).then(ab=>{decOK();MEM.note();if(VFILE!==file)return;AUDIO=ab;playBuf=null;WAVE=peaks(ab,4000);waveW=0;updTimeline();updSound();rebuild('video',true)}).catch(e=>{decOK();AUDIO=false;console.warn('audio',e);rebuild('video',true)});
   if(!P.video.noPreview&&!P.video.audioOnly){const key=proxyKey(file);IDB.get('proxy').then(pr=>{if(pr&&pr.blob&&pr.key&&pr.key.startsWith(vidKey(file)+'|')&&vidKey(VFILE)===vidKey(file)){PROXY.url=URL.createObjectURL(pr.blob);PROXY.key=pr.key;applyProxy();rebuild('video',true);if(pr.key!==key&&VPREV==='proxy')setTimeout(()=>{if(proxyKey(VFILE)===key&&PROXY.key!==key&&!PROXY.busy)makeProxy()},1200)}else if(VPREV==='proxy'&&needsProxy()){Promise.resolve(AUDIO_P).catch(()=>{}).then(()=>{if(proxyKey(VFILE)===key&&!PROXY.url)makeProxy()})}}).catch(()=>{})}}
@@ -5118,7 +5129,7 @@ function cloudMeterText(u){if(!window.WRD_CLOUD)return '';if(navigator.onLine===
   return u.leftMin<=0?'Today’s cloud minutes are used up · they reset in about '+h+' h':'Cloud captions · '+(Math.round(u.leftMin*10)/10)+' of '+u.capMin+' min left today'}
 function cloudMeterPaint(){const el=document.getElementById('cloudMeter');if(!el)return;el.textContent=cloudMeterText(CCAP.u);if(window.WRD_CLOUD&&navigator.onLine!==false&&(!CCAP.u||Date.now()-CCAP.at>60000))cloudUsage().then(u=>{const e2=document.getElementById('cloudMeter');if(e2)e2.textContent=cloudMeterText(u)})}
 /* 16 kHz Float32 → 16-bit WAV → base64 (done by the browser, off the main path) */
-function wavBlob(f32){const n=f32.length,b=new ArrayBuffer(44+n*2),v=new DataView(b);const W=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+function wav16Blob(f32){const n=f32.length,b=new ArrayBuffer(44+n*2),v=new DataView(b);const W=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
   W(0,'RIFF');v.setUint32(4,36+n*2,true);W(8,'WAVE');W(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,16000,true);v.setUint32(28,32000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);W(36,'data');v.setUint32(40,n*2,true);
   let pk=0;for(let i=0;i<n;i++){const a=Math.abs(f32[i]);if(a>pk)pk=a}const g=pk>0&&pk<.25?Math.min(4,.5/pk):1;
   for(let i=0;i<n;i++){let x=f32[i]*g;x=x<-1?-1:x>1?1:x;v.setInt16(44+i*2,x<0?x*32768:x*32767,true)}return new Blob([b],{type:'audio/wav'})}
@@ -5133,7 +5144,7 @@ async function cloudListen(wins,lang,onStatus){const tot=wins.reduce((t,B)=>t+B.
   if(u.leftMin!=null&&u.leftMin*60<tot*.85){throw cloudErr('cap','Not enough cloud minutes left today ('+(Math.round(u.leftMin*10)/10)+' min) for this clip · using on-device captions')}
   const prompt=encodeURIComponent((P.cap.vocab||'').split(/[,\n;]+/).map(x=>x.trim()).filter(Boolean).join(', ').slice(0,280));
   const out=new Array(wins.length);let done=0,next=0,fail=null;
-  const one=async i=>{const B=wins[i];const body=await blobB64(wavBlob(B.audio));let j=null;
+  const one=async i=>{const B=wins[i];const body=await blobB64(wav16Blob(B.audio));let j=null;
     for(let t=0;t<3;t++){j=await cloudFetch({method:'POST',headers:{'content-type':'text/plain','x-wrd-lang':lang||'','x-wrd-prompt':prompt},body},Math.max(45000,B.audio.length/16000*4000));
       if(j.ok||j.fallback||(j.status>=400&&j.status<500))break;await new Promise(r=>setTimeout(r,700*(t+1)))}
     if(!j.ok){throw cloudErr(j.code||'ai',j.error||'Cloud captions failed')}
@@ -5935,6 +5946,7 @@ function buildVideo(){const p=h('div',{class:'panel'});const C=P.cap;
   else{const v=P.video;p.append(sec('Video',h('div',{class:'vcard'},h('b',null,v.name),h('small',null,`${fmtT(v.dur)}${v.audioOnly?' · audio only':` · ${v.w}×${v.h}`}${AUDIO===null?' · reading audio…':AUDIO===false?' · audio will be read when you generate captions':' · audio ready'}`)),
     h('div',{class:'pillrow'},h('label',{class:'pillbtn',for:'vidFile'},'Replace'),AUDIO?h('button',{type:'button',class:'pillbtn',onclick:()=>{saveBlob(wavBlob(AUDIO),slug()+'_audio.wav')}},'Extract audio (WAV)'):AUDIO===false?h('button',{type:'button',class:'pillbtn',onclick:async()=>{try{const AC=window.AudioContext||window.webkitAudioContext;if(!capAC)capAC=new AC();await capAC.resume();toast('Reading audio… keep this tab open');AUDIO=await captureAudioByPlaying(null,capAC);WAVE=peaks(AUDIO,4000);waveW=0;updTimeline();rebuild('video',true);toast('Audio ready')}catch(e){toast('Couldn’t read audio: '+e.message)}}},'Read audio'):null,
       h('button',{type:'button',class:'pillbtn',onclick:()=>{rmVideo();changed()}},'Remove video'),fi),
+    mobNote(),
     convCard(),
     bigVideo()&&!(VPREV==='proxy'&&showVid)?h('div',{class:'rec',style:'display:block'},h('b',null,'Your video is '+v.w+' × '+v.h),h('small',{style:'display:block;margin:4px 0 8px'},'That much resolution can stutter in the editor. Preview a lighter copy instead: your export stays full quality.'),
       h('div',{class:'pillrow'},h('button',{type:'button',class:'pillbtn',onclick:()=>setProxyRes('720')},'Preview in 720p'),h('button',{type:'button',class:'pillbtn',onclick:()=>setProxyRes('1080')},'Preview in 1080p'))):null,
