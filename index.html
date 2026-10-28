@@ -4077,26 +4077,27 @@ function trackCodec(vt){const c=vt.cfg;if(!c)return null;const b=c.bytes,hx=x=>x
   if(c.type==='vpcC'&&b.length>6)return{codec:'vp09.'+String(b[4]).padStart(2,'0')+'.'+String(b[5]).padStart(2,'0')+'.'+String(b[6]>>4).padStart(2,'0')};
   if(c.type==='av1C'&&b.length>3){const pr=b[1]>>5,lv=b[1]&31,ti=b[2]>>7,hb=(b[2]>>6)&1,tw=(b[2]>>5)&1;return{codec:'av01.'+pr+'.'+String(lv).padStart(2,'0')+(ti?'H':'M')+'.'+(hb?(tw?'12':'10'):'08'),description:b}}
   return null}
+function hwNo(why){CONV.hwWhy=why;console.info('video chip conversion skipped:',why);return null}
 async function convertHW(onP,isCancelled){
-  if(typeof VideoDecoder==='undefined'||typeof VideoEncoder==='undefined'||!window.Mp4Muxer||!VFILE)return null;const file=VFILE;
-  const boxes=await topBoxes(file);const mb=boxes.find(b=>b.type==='moov');if(!mb||mb.size>200e6)return null;
-  const dv=await readRange(file,mb.off,mb.off+mb.size);const moov={body:8,end:dv.byteLength};const vt=videoTrack(dv,moov);if(!vt||!vt.samples.length||!vt.samples[0].key)return null;
-  const tc=trackCodec(vt);if(!tc)return null;
+  if(typeof VideoDecoder==='undefined'||typeof VideoEncoder==='undefined')return hwNo('no WebCodecs');if(!window.Mp4Muxer)return hwNo('muxer not loaded');if(!VFILE)return null;const file=VFILE;
+  const boxes=await topBoxes(file);const mb=boxes.find(b=>b.type==='moov');if(!mb||mb.size>200e6)return hwNo('no movie header');
+  const dv=await readRange(file,mb.off,mb.off+mb.size);const moov={body:8,end:dv.byteLength};const vt=videoTrack(dv,moov);if(!vt||!vt.samples.length||!vt.samples[0].key)return hwNo('no video track');
+  const tc=trackCodec(vt);if(!tc)return hwNo('codec '+vt.fmt);
   let dcfg=null;for(const hw of ['prefer-hardware','no-preference']){const c=Object.assign({codec:tc.codec,codedWidth:vt.cw,codedHeight:vt.ch,hardwareAcceleration:hw,optimizeForLatency:false},tc.description?{description:tc.description}:{});
     try{const r=await VideoDecoder.isConfigSupported(c);if(r&&r.supported){dcfg=c;break}}catch(e){}}
-  if(!dcfg){console.info('HW convert: decoder not available for',tc.codec);return null}
+  if(!dcfg)return hwNo('no decoder for '+tc.codec);
   /* sound: AAC copied across as-is; anything else → regular converter */
   const at=audioTrack(dv,moov);let aac=null;
-  if(at){if(at.fmt!=='mp4a'||!at.asc)return null;const chn=((at.asc[1]>>3)&15)||at.ch;const fr=[];for(const c of chunkList(at)){let p=0;for(let k=0;k<c.n;k++){const sz=at.fixed||at.sizes[c.first+k];fr.push({off:c.off+p,len:sz});p+=sz}}aac={chn,sr:at.sr,fr}}
+  if(at){if(at.fmt!=='mp4a'||!at.asc)return hwNo('sound '+at.fmt);const chn=((at.asc[1]>>3)&15)||at.ch;const fr=[];for(const c of chunkList(at)){let p=0;for(let k=0;k<c.n;k++){const sz=at.fixed||at.sizes[c.first+k];fr.push({off:c.off+p,len:sz});p+=sz}}aac={chn,sr:at.sr,fr}}
   const rot=((vt.rot%360)+360)%360,side=rot===90||rot===270;const dw=side?vt.ch:vt.cw,dh=side?vt.cw:vt.ch;
   const k=Math.min(1,1080/Math.min(dw,dh));const ow=Math.max(2,Math.round(dw*k/2)*2),oh=Math.max(2,Math.round(dh*k/2)*2);
   const S=vt.samples,ts=vt.timescale,dur=(S[S.length-1].dts+S[S.length-1].dur)/ts||P.video.dur||1,fps=Math.min(60,Math.max(1,Math.round(S.length/dur)));
   const br=Math.round(Math.min(10e6*ow*oh/(1080*1920),(isMobileUA()?220e6:700e6)*8/dur));
   let ecfg=null,mc='avc';for(const [codec,m_] of [['avc1.640028','avc'],['avc1.4D4028','avc'],['avc1.42E028','avc'],['avc1.640033','avc'],['vp09.00.40.08','vp9']]){
     const c={codec,width:ow,height:oh,bitrate:Math.max(1e6,br),framerate:fps,hardwareAcceleration:'no-preference'};if(m_==='avc')c.avc={format:'avc'};try{const q=await VideoEncoder.isConfigSupported(c);if(q.supported){ecfg=c;mc=m_;break}}catch(e){}}
-  if(!ecfg)return null;
+  if(!ecfg)return hwNo('no encoder');
   const mux=new Mp4Muxer.Muxer({target:new Mp4Muxer.ArrayBufferTarget(),video:{codec:mc,width:ow,height:oh,frameRate:fps},audio:aac?{codec:'aac',numberOfChannels:aac.chn,sampleRate:aac.sr}:undefined,fastStart:'in-memory',firstTimestampBehavior:'offset'});
-  if(aac&&typeof mux.addAudioChunkRaw!=='function'&&typeof EncodedAudioChunk==='undefined')return null;
+  if(aac&&typeof mux.addAudioChunkRaw!=='function'&&typeof EncodedAudioChunk==='undefined')return hwNo('no audio copy');
   /* sound bytes (small) read up front, added in step with the picture */
   let aBytes=null,aNext=0;const aDur=Math.round(1024/aac?.sr*1e6)||0;
   if(aac){aBytes=new Array(aac.fr.length);await readChunks(file,aac.fr.map((f,i)=>({off:f.off,len:f.len,i})),(c,buf)=>{aBytes[c.i]=buf.slice()})}
@@ -4137,9 +4138,9 @@ async function loadFF(onP){if(CONV.ff)return CONV.ff;let last=null;const mtOK=!F
     if(!window.FFmpegWASM)await loadScript(`${cdn}/@ffmpeg/ffmpeg@${v}/dist/umd/ffmpeg.js`);
     const classWorkerURL=await fetchBlobURL(`${cdn}/@ffmpeg/ffmpeg@${v}/dist/umd/814.ffmpeg.js`,'text/javascript');const pkg=mt?'core-mt':'core';
     const wasmURL=await fetchBlobURL(`${cdn}/@ffmpeg/${pkg}@${FFCORE}/dist/umd/ffmpeg-core.wasm`,'application/wasm',onP);
-    for(const flavor of ['esm','umd']){const coreURL=await fetchBlobURL(`${cdn}/@ffmpeg/${pkg}@${FFCORE}/dist/${flavor}/ffmpeg-core.js`,'text/javascript');
-      const workerURL=mt?await fetchBlobURL(`${cdn}/@ffmpeg/${pkg}@${FFCORE}/dist/${flavor}/ffmpeg-core.worker.js`,'text/javascript'):undefined;
-      const ff=new window.FFmpegWASM.FFmpeg();try{await withTO(ff.load(Object.assign({coreURL,wasmURL,classWorkerURL},mt?{workerURL}:{})),90000,'The converter took too long to start');CONV.ff=ff;CONV.mt=mt;console.info('converter ready',mt?'multi-core':'single-core');return ff}catch(e){last=e;try{ff.terminate()}catch(_){}}}
+    for(const [flavor,direct] of [['umd',false],['umd',true],['esm',false]]){const base=`${cdn}/@ffmpeg/${pkg}@${FFCORE}/dist/${flavor}/`;const coreURL=direct?base+'ffmpeg-core.js':await fetchBlobURL(base+'ffmpeg-core.js','text/javascript');
+      const workerURL=mt?(direct?base+'ffmpeg-core.worker.js':await fetchBlobURL(base+'ffmpeg-core.worker.js','text/javascript')):undefined;
+      const ff=new window.FFmpegWASM.FFmpeg();try{await withTO(ff.load(Object.assign({coreURL,wasmURL:direct?`${cdn}/@ffmpeg/${pkg}@${FFCORE}/dist/umd/ffmpeg-core.wasm`:wasmURL,classWorkerURL},mt?{workerURL}:{})),90000,'The converter took too long to start');CONV.ff=ff;CONV.mt=mt;console.info('converter ready',mt?'multi-core':'single-core');return ff}catch(e){last=e;try{ff.terminate()}catch(_){}}}
     break}catch(e){last=e;console.warn('ffmpeg load',mt?'mt':'st',e)}}
   throw last||new Error('The converter couldn’t load')}
 function convUI(){const b=document.getElementById('convBar');if(b)b.style.width=Math.round(CONV.p*100)+'%';const t=document.getElementById('convTxt');if(t)t.textContent=CONV.msg}
@@ -4158,10 +4159,10 @@ async function srcIsAAC(){try{const bx=await topBoxes(VFILE);const mb=bx.find(b=
    1. the device's video chip (WebCodecs): usually seconds;
    2. a quick preview from the keyframes only (about one picture per second) so editing can start right away;
    3. the smooth full 1080p copy, on every processor core the browser allows. */
-async function convertVideo(auto){if(CONV.busy||!VFILE||!P.video)return;CONV.busy=true;CONV.p=0;CONV.fail='';CONV.stage='hw';CONV.msg='Converting with your device’s video chip…';rebuild('video',true);
+async function convertVideo(auto){if(CONV.busy||!VFILE||!P.video)return;CONV.busy=true;CONV.p=0;CONV.fail='';CONV.hwWhy='';CONV.stage='hw';CONV.msg='Converting with your device’s video chip…';rebuild('video',true);
   const key=vidKey(VFILE),dur=P.video.dur||1,stale=()=>!P.video||vidKey(VFILE)!==key;let ff=null,mnt=null;
   try{let blob=null;
-    try{blob=await convertHW(q=>{CONV.p=clamp(q)*.98;CONV.msg='Converting with your device’s video chip… '+Math.round(clamp(q)*100)+'%';convUI()},()=>CONV.cancelled)}catch(e){if(e==='cancel')throw e;console.warn('video chip conversion failed, using the regular converter',e)}
+    try{blob=await convertHW(q=>{CONV.p=clamp(q)*.98;CONV.msg='Converting with your device’s video chip… '+Math.round(clamp(q)*100)+'%';convUI()},()=>CONV.cancelled)}catch(e){if(e==='cancel')throw e;CONV.hwWhy=String(e&&e.message||e).slice(0,80);console.warn('video chip conversion failed, using the regular converter',e)}
     if(CONV.cancelled)throw 'cancel';if(stale())return;
     if(blob){IDB.put('conv',{key,blob}).catch(()=>{});if(await useConverted(blob))toast('Video converted on your device’s video chip · smooth preview and Video + Text export now use the 1080p copy');return}
     CONV.stage='load';CONV.p=0;CONV.msg='Loading the converter (one time, about 30 MB)…';rebuild('video',true);
@@ -4179,7 +4180,7 @@ async function convertVideo(auto){if(CONV.busy||!VFILE||!P.video)return;CONV.bus
     const full=await run(['-i','-map','0:v:0','-map','0:a:0?','-vf',scl(short),'-c:v','libx264','-preset','ultrafast','-crf','20',...(aac?['-c:a','copy']:['-c:a','aac','-b:a','192k']),'-write_tmcd','0','-movflags','+faststart'],'wrd_out.mp4',P.video.conv&&P.video.conv.quick?.2:.04,.99,'Converting…');
     if(stale())return;CONV.msg='Finishing…';CONV.p=.99;convUI();IDB.put('conv',{key,blob:full}).catch(()=>{});
     if(await useConverted(full))toast('Video converted · smooth preview, captions and Video + Text export now use the 1080p copy')}
-  catch(e){console.warn('convert',e);if(e==='cancel'||CONV.cancelled){CONV.fail='';toast('Conversion cancelled')}else CONV.fail=(CONV.stage==='load'?'The converter couldn’t download. Check your internet connection and tap Try converting again.':(e&&e.message||String(e)).replace(/^Error:\s*/,''))+' If it keeps failing, convert the clip to H.264 in your camera app or CapCut and upload that.'}
+  catch(e){console.warn('convert',e);if(e==='cancel'||CONV.cancelled){CONV.fail='';toast('Conversion cancelled')}else CONV.fail=(CONV.stage==='load'?'The converter couldn’t download. Check your internet connection and tap Try converting again.':(e&&e.message||String(e)).replace(/^Error:\s*/,''))+' If it keeps failing, convert the clip to H.264 in your camera app or CapCut and upload that.'+(CONV.hwWhy?' (video chip: '+CONV.hwWhy+')':'')}
   finally{if(mnt&&ff){try{mnt.mounted?await ff.unmount('/wrdin'):await ff.deleteFile(mnt.path)}catch(e){}}CONV.busy=false;CONV.cancelled=false;CONV.stage='';rebuild('video',true)}}
 function cancelConvert(){if(!CONV.busy)return;CONV.cancelled=true;try{CONV.ff&&CONV.ff.terminate()}catch(e){}CONV.ff=null}
 function convTip(){const ua=navigator.userAgent;return /iPhone|iPad/.test(ua)||(/Mac/.test(ua)&&navigator.maxTouchPoints>1)?'Skip this next time: in Blackmagic Camera or other pro apps pick H.264, or HEVC 8-bit (not 4:2:2). iPhone Camera: Settings › Camera › Formats › Most Compatible.'
@@ -4565,7 +4566,9 @@ async function loadVideo(file,o={}){if(!file)return;if(!o.restore){IDB.put('vide
   P.video={name:file.name,size:file.size,dur,w:w||1080,h:hh||1920,audioOnly:audioOnly||!w,noPreview:!playable};CONV.fail='';
   vidCodec(file).then(cd=>{if(P.video&&P.video.name===file.name&&cd){P.video.codec=cd;rebuild('video',true);if(VPREV==='proxy'&&needsProxy()&&!PROXY.url&&!PROXY.busy)setTimeout(()=>{if(P.video&&P.video.name===file.name&&!PROXY.url)makeProxy()},1500)}});
   if(!o.noConv)IDB.get('conv').then(cv=>{if(cv&&cv.blob&&cv.key===vidKey(file)&&P.video&&P.video.name===file.name)useConverted(cv.blob,{restore:true})}).catch(()=>{});
-  if(playable&&!P.video.audioOnly&&!o.noProbe){const myURL=vidURL;probeDecode(myURL).then(r=>{if(!P.video||vidURL!==myURL||P.video.conv)return;
+  if(playable&&!P.video.audioOnly&&!o.noProbe){const myURL=vidURL;probeDecode(myURL).then(async r=>{if(!P.video||vidURL!==myURL||P.video.conv)return;
+    /* phones sometimes won't play a hidden test copy even though the file is fine: plain H.264 that loaded is trusted */
+    if(r===false&&bgV.videoWidth){const cd=await vidCodec(file).catch(()=>'');if(/^avc[13]$/.test(cd)||cd==='mp4v'){console.info('probe said no picture, but',cd,'loaded fine: keeping it');return}}
     if(r===false){P.video.noPreview=true;bgV.pause();bgV.removeAttribute('src');try{bgV.load()}catch(e){}resetProxy();toast('This browser can’t show this video’s picture · converting it for you now');updBg();sizeView();rebuild('video',true);if(!o.noConv)autoConvert(file)}
     else if(r==='slow'){P.video.slowDecode=true;rebuild('video',true);if(VPREV==='proxy'&&!PROXY.url&&!PROXY.busy)makeProxy()}})}
   if(!playable){showVid=false;bgV.removeAttribute('src');toast('This browser can’t show this video’s picture (e.g. 10-bit HEVC or ProRes) · converting it for you now. Captions and timing already work.');if(!o.noConv)autoConvert(file)}
