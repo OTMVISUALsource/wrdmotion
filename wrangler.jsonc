@@ -1,0 +1,12 @@
+// WRD on Cloudflare: the site files plus the cloud captions Worker.
+{
+  "name": "wrdmotion",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-23",
+  "assets": { "directory": ".", "binding": "ASSETS" },
+  "ai": { "binding": "AI" },
+  "kv_namespaces": [
+    { "binding": "USAGE", "id": "6cf7eb7f09a54bb09ff4579ba9cbc392" }
+  ],
+  "observability": { "enabled": true }
+}
