@@ -3930,7 +3930,7 @@ $('#keyTip').addEventListener('click',()=>{const pop=$('#keyPop');pop.hidden=!po
 
 /* layout: desktop columns vs mobile dock */
 const LIB=['video','looks','mg','anim','sfx','shine','fx'],INSP=['text','size','style','grad','gloss','logo','d3','safe'],MOB=['video','looks','mg','anim','sfx','text','size','style','grad','gloss','fx','shine','safe','logo','d3'];
-let libTab='anim',inspTab='text',mobTab='anim';
+let libTab='video',inspTab='text',mobTab='video';
 function ensurePanel(id){if(!panelEls[id]){panelEls[id]=h('div',{'data-panel':id});panelEls[id].append(PANELS[id].build())}return panelEls[id]}
 function rebuild(id,keepScroll){const el=panelEls[id];if(!el)return;const sc=el.parentElement?el.parentElement.scrollTop:0;el.replaceChildren(PANELS[id].build());if(keepScroll&&el.parentElement)el.parentElement.scrollTop=sc}
 function refreshAll(){Object.keys(panelEls).forEach(k=>{if(k!=='looks')rebuild(k,true)});updAspect();updBg();updTimeline();updKey()}
