@@ -940,6 +940,7 @@ input,select,textarea{font:inherit;color:inherit}
 
 .txtin{width:100%;box-sizing:border-box;background:#080a0f;border:1px solid var(--line2);border-radius:12px;padding:12px 14px;font-size:16px;font-weight:600}
 .txtin:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px rgba(61,123,255,.18)}
+.linechips .own{box-shadow:inset 0 0 0 1px rgba(255,77,125,.55)}.linechips .own::after{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff4d7d;margin-left:6px;vertical-align:middle}
 .linechips{display:flex;gap:6px;flex-wrap:wrap}
 .linechips button{padding:7px 12px;border-radius:10px;border:1px solid var(--line);color:var(--muted);font-weight:600;font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .linechips button[aria-pressed="true"]{color:#fff;border-color:var(--accent);background:rgba(61,123,255,.12);box-shadow:0 0 14px -6px var(--accent)}
@@ -2687,8 +2688,15 @@ const Engine=(()=>{
     if(at.type==='sparkles'){for(let i=0;i<16;i++){const ph=hash(i*4.7),sp=.5+hash(i*2.9)*.9;const tw=bump(((t*sp+ph)%1.2)/1.2);if(tw<=0)continue;const q=proj(b.x0-em*.6+hash(i*1.3)*(b.x1-b.x0+em*1.2),b.top-em*.5+hash(i*8.1)*(b.bottom-b.top+em));star(tc,q[0],q[1],em*(.18+hash(i*6.6)*.3)*tw,t*.6+i,col,vis*at.int*tw)}}
     if(at.screenFlash&&atm.flash>0){tc.globalCompositeOperation='source-over';tc.fillStyle=rgba(mix(col,'#ffffff',.7),atm.flash*.28*at.int);tc.fillRect(0,0,W,H)}
     tc.restore()}
-  function threeD(S,A,gp,G,t){
-    const d=S.d3;let rx=d.rx*DEG,ry=d.ry*DEG,rz=d.rz*DEG,gz=0,gy=0,s=1,a=1,top=false;
+  /* words that have their own 3D (S.d3.words, keyed by the word's number in reading order), with the area of the frame that belongs to each */
+  function d3Words(S,lay){const WO=S.d3&&S.d3.words;if(!WO||!lay||!lay.lines||S.mg)return[];const keys=Object.keys(WO).filter(k=>WO[k]);if(!keys.length)return[];
+    const lns=lay.lines.filter(ln=>!ln.L.float&&ln.words);const out=[];let n=0;
+    lay.lines.forEach(ln=>{(ln.words||[]).forEach((w,wi)=>{const o=WO[n];if(o&&!ln.L.float){const li=lns.indexOf(ln),pv=lns[li-1],nx=lns[li+1],ws=ln.words,em=ln.px;
+        const x0=wi>0?(ws[wi-1].x1+w.x0)/2:Math.min(w.x0-em*.8,ln.x0-em*.8)-1e4,x1=wi<ws.length-1?(w.x1+ws[wi+1].x0)/2:Math.max(w.x1+em*.8,ln.x1+em*.8)+1e4;
+        const y0=pv?(pv.bottom+ln.top)/2:ln.top-1e4,y1=nx?(ln.bottom+nx.top)/2:ln.bottom+1e4;
+        out.push({w,o,n,r:{x0,y0,x1,y1}})}n++})});return out}
+  function threeD(S,A,gp,G,t,wo,wn){
+    const d=wo?Object.assign({},S.d3,wo):S.d3;if(wo&&d.idle!=='spin')t+=(wn||0)*.37;let rx=(+d.rx||0)*DEG,ry=(+d.ry||0)*DEG,rz=(+d.rz||0)*DEG,gz=0,gy=0,s=1,a=1,top=false;
     if(A.global){const g=A.global(gp,G)||{};rx+=g.rx||0;ry+=g.ry||0;rz+=g.rz||0;gz+=g.z||0;s*=g.s??1;a*=g.a??1;top=g.pivot==='top'}
     const k=d.idleAmt??.5;
     switch(d.idle){case'float':gy+=Math.sin(t*2.2)*.03*k;rx+=Math.sin(t*1.6)*.07*k;break;
@@ -2712,7 +2720,12 @@ const Engine=(()=>{
     const norm=st=>{st=Object.assign({},ST0,st);st.a*=fade;for(const k of SNAPK)if(Math.abs(st[k])<.00008)st[k]=0;if(Math.abs(st.sx-1)<.00008)st.sx=1;if(Math.abs(st.sy-1)<.00008)st.sy=1;return st};
     const allSt=mode==='all'?contMo(norm(A.fn(EIN(gp),lay.block,G)),lay.block,G,S,t):null;
     const R={x0:1e9,y0:1e9,x1:-1e9,y1:-1e9};const perLine=S.lines.some(L=>L.shine&&(L.shine.mode==='own'||L.shine.mode==='off'));const SX=[];let PGu=false,PGc=null;
-    for(const ln0 of (S.mg?[]:(lay.order||lay.lines))){
+    let sp=-1,atm=null;
+    /* draws the text face into X. F (per-word 3D) limits it to some words: {only:Set} or {skip:Set} of word numbers; R collects the drawn bounds */
+    const drawFace=(F,R)=>{X.setTransform(1,0,0,1,0,0);X.globalCompositeOperation='source-over';X.globalAlpha=1;X.clearRect(0,0,W,H);SX.length=0;
+    const wOK=gi=>!F||(F.only?F.only.has(gi):!F.skip.has(gi));
+    for(const ln0 of (S.mg||(F&&F.only&&!(lay.order||lay.lines).length)?[]:(lay.order||lay.lines))){
+      if(F&&!ln0.words.some(w=>wOK(w.gi)))continue;
       if(!ln0.glyphs.length||(opts.hide&&opts.hide.has(ln0.li)))continue;
       /* negative pass: draw the line as one flat color (no gradient, glow or plate) without touching the cached layout line */
       const fc=opts.flatMap?opts.flatMap.get(ln0.li):opts.flatCol;const ln=fc?Object.assign(Object.create(ln0),{L:Object.assign({},ln0.L,{mat:'flat',c1:fc,cc:undefined,gm:undefined,lglow:undefined,plate:undefined})}):ln0;
@@ -2728,10 +2741,12 @@ const Engine=(()=>{
       if(gwOn){lnP=Object.assign(Object.create(ln),{L:Object.assign({},ln.L,{mat:'flat',c1:S.gradPlain||'#ffffff',c2:undefined,c3:undefined,cc:undefined,gm:undefined,plate:undefined})});styP=lineStyle(c,lnP);fillP=c.fillStyle;strokeP=c.strokeStyle;lwP=c.lineWidth;c.fillStyle=fillG;c.strokeStyle=strokeG;c.lineWidth=lwG;LP=LPg}
       const setP=()=>{c.fillStyle=fillP;c.strokeStyle=strokeP;c.lineWidth=lwP},setG=()=>{c.fillStyle=fillG;c.strokeStyle=strokeG;c.lineWidth=lwG};
       /* styles that move a whole line at once: the line is drawn twice, each time clipped to its gradient / plain words */
-      const rc=want=>{const out=[],ws=ln.words,em=ln.px;for(let k=0;k<ws.length;k++){if(gwL.has(ws[k].gi)!==want)continue;const x0=k?(ws[k-1].x1+ws[k].x0)/2:ln.x0-em*3,x1=k<ws.length-1?(ws[k].x1+ws[k+1].x0)/2:ln.x1+em*3;out.push([x0,ln.top-em*1.5,x1-x0,ln.bottom-ln.top+em*3])}return out};
+      const rc=want=>{const out=[],ws=ln.words,em=ln.px;for(let k=0;k<ws.length;k++){if(gwL.has(ws[k].gi)!==want||(F&&!wOK(ws[k].gi)))continue;const x0=k?(ws[k-1].x1+ws[k].x0)/2:ln.x0-em*3,x1=k<ws.length-1?(ws[k].x1+ws[k+1].x0)/2:ln.x1+em*3;out.push([x0,ln.top-em*1.5,x1-x0,ln.bottom-ln.top+em*3])}return out};
       const dl=ln.L.delay||0,tauL=dl&&t<I+dl?clamp(t-dl,0,I):tau;
       const LR={x0:1e9,y0:1e9,x1:-1e9,y1:-1e9};
+      const fClip=F&&ln0.words.some(w=>!wOK(w.gi))?(()=>{const out=[],ws=ln0.words,em=ln0.px;for(let k=0;k<ws.length;k++){if(!wOK(ws[k].gi))continue;const x0=k?(ws[k-1].x1+ws[k].x0)/2:ln0.x0-em*6,x1=k<ws.length-1?(ws[k].x1+ws[k+1].x0)/2:ln0.x1+em*6;out.push([x0,ln0.top-em*4,x1-x0,ln0.bottom-ln0.top+em*8])}return out})():null;
       units.forEach((u,ui)=>{let st;
+        if(F&&(mL==='word'||mL==='char')&&!wOK(mL==='word'?u.gi:u.wi))return;
         if(opts.skipW&&(mL==='char'||mL==='word')&&opts.skipW.has(mL==='word'?u.gi:u.wi))return;
         if(mL==='all')st=allSt;
         else{let pu;
@@ -2747,14 +2762,15 @@ const Engine=(()=>{
           /* a negative word in one colour takes that colour, even if it is the highlighted or karaoke word */
           if(mL!=='line'&&!fc&&!ln.L._negFlat){const wi=mL==='word'?u.gi:u.wi;if(S.emph&&S.emph.includes(wi)&&!(gwS&&gwS.has(wi)))st.color=S.emphColor;if(S.karaoke&&WT){const ws=WT[wi]??0,we=WT[wi+1]??1e9;if(t>=ws&&t<we)st.color=S.karaokeColor}}}
         const pv_=mL==='all'?lay.block:u;
+        if(fClip&&mL!=='word'&&mL!=='char'&&!gwL)st=Object.assign({},st,{wordClip:fClip});
         if(gwL){setG();drawUnit(c,ln,u,Object.assign({},st,{wordClip:rc(true)}),sty,pv_,LR);setP();drawUnit(c,lnP,u,Object.assign({},st,{wordClip:rc(false)}),styP,pv_,LR);setG()}
         else if(gwS&&!gwS.has(mL==='word'?u.gi:u.wi)){setP();drawUnit(c,lnP,u,st,styP,pv_,LR);setG()}
         else drawUnit(c,ln,u,st,sty,pv_,LR)});
       c.shadowBlur=0;c.shadowColor='rgba(0,0,0,0)';c.globalAlpha=1;
       if(LR.x1>LR.x0){R.x0=Math.min(R.x0,LR.x0);R.y0=Math.min(R.y0,LR.y0);R.x1=Math.max(R.x1,LR.x1);R.y1=Math.max(R.y1,LR.y1)}
-      if(needPost&&LR.x1>LR.x0){const r=reg(LR,W,H,4+ln.px*(ln.L.lglow?.9:.25));postLine(sc,ln,M,r);if(perLine){const es=effShine(ln.L,S);if(es&&es.on){const spL=shineP(es,t);if(spL>=0){const own=ln.L.shine&&ln.L.shine.mode==='own';const geo=own?{block:{x0:ln.x0,x1:ln.x1,top:ln.top,bottom:ln.bottom,cx:ln.cx,cy:ln.cy},em:ln.px,glyphs:ln.glyphs}:null;shine(L,S,spL,G,lay,es,geo);SX.push({sh:es,sp:spL,geo})}}}if(gmP&&LP>.002&&r.w>0){if(!PGu){PGc=small(sc,'PGc',W,H);PGc.x.setTransform(1,0,0,1,0,0);PGc.x.globalAlpha=1;PGc.x.globalCompositeOperation='source-over';PGc.x.clearRect(0,0,W,H);PGu=true}const a_=(ln.L.gm.amt??1);for(const [rr,al,key] of [[ln.px*.15*(1+.3*LP),.9,'gPw'],[ln.px*.045,.7,'gPt']]){const bl=blurred(sc,sc.L.c,W,H,Math.max(1,rr),null,key);PGc.x.globalAlpha=clamp(LP*a_*al);PGc.x.drawImage(bl,0,0,W,H)}PGc.x.globalAlpha=1}if(r.w>0&&r.h>0){const lg=ln.L.lglow;if(lg&&lg.int>0){for(const [rad,ia,key] of (FAST?[[lg.size*ln.px*1.1,lg.int*1.7,'lgW']]:[[lg.size*ln.px*1.3,lg.int*1.3,'lgW'],[lg.size*ln.px*.38,lg.int*1.0,'lgT']])){const bl=blurred(sc,sc.L.c,W,H,Math.max(1,rad),lg.color,key);let a=ia;while(a>.01){X.globalAlpha=Math.min(1,a);X.drawImage(bl,0,0,W,H);a-=1}}X.globalAlpha=1}X.drawImage(sc.L.c,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h)}}
+      if(needPost&&LR.x1>LR.x0){const r=reg(LR,W,H,4+ln.px*(ln.L.lglow?.9:.25));postLine(sc,ln,M,r);if(perLine){const es=effShine(ln.L,S);if(es&&es.on){const spL=shineP(es,t);if(spL>=0){const own=ln.L.shine&&ln.L.shine.mode==='own';const geo=own?{block:{x0:ln.x0,x1:ln.x1,top:ln.top,bottom:ln.bottom,cx:ln.cx,cy:ln.cy},em:ln.px,glyphs:ln.glyphs}:null;shine(L,S,spL,G,lay,es,geo);SX.push({sh:es,sp:spL,geo})}}}if(gmP&&LP>.002&&r.w>0&&!(F&&F.only)){if(!PGu){PGc=small(sc,'PGc',W,H);PGc.x.setTransform(1,0,0,1,0,0);PGc.x.globalAlpha=1;PGc.x.globalCompositeOperation='source-over';PGc.x.clearRect(0,0,W,H);PGu=true}const a_=(ln.L.gm.amt??1);for(const [rr,al,key] of [[ln.px*.15*(1+.3*LP),.9,'gPw'],[ln.px*.045,.7,'gPt']]){const bl=blurred(sc,sc.L.c,W,H,Math.max(1,rr),null,key);PGc.x.globalAlpha=clamp(LP*a_*al);PGc.x.drawImage(bl,0,0,W,H)}PGc.x.globalAlpha=1}if(r.w>0&&r.h>0){const lg=ln.L.lglow;if(lg&&lg.int>0){for(const [rad,ia,key] of (FAST?[[lg.size*ln.px*1.1,lg.int*1.7,'lgW']]:[[lg.size*ln.px*1.3,lg.int*1.3,'lgW'],[lg.size*ln.px*.38,lg.int*1.0,'lgT']])){const bl=blurred(sc,sc.L.c,W,H,Math.max(1,rad),lg.color,key);let a=ia;while(a>.01){X.globalAlpha=Math.min(1,a);X.drawImage(bl,0,0,W,H);a-=1}}X.globalAlpha=1}X.drawImage(sc.L.c,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h)}}
     }
-    if(lay.img){const u=lay.img;let st;const SP_=logoSpan(S);const okA=x=>x&&!x.custom&&!x.overlay&&!x.global;
+    if(lay.img&&!(F&&F.only)){const u=lay.img;let st;const SP_=logoSpan(S);const okA=x=>x&&!x.custom&&!x.overlay&&!x.global;
       let IA=S.img.anim&&ANIM_BY[S.img.anim];if(!okA(IA)&&SP_.custom)IA=okA(A)?A:ANIM_BY.blurpop;const IOA=ANIM_BY[S.img.outAnim||S.outAnim],ownI=okA(IA);
       if(ownI){
         /* the logo's own animation and its own span on the timeline (start / end), independent from the text */
@@ -2773,12 +2789,23 @@ const Engine=(()=>{
         st=(A.custom||A.noImg)?norm({a:clamp(pI*2),sx:.6+.4*E.outBack(pI,2),sy:.6+.4*E.outBack(pI,2),blur:(1-pI)*.1}):norm(A.fn(pI,u,G));if(SM&&outQ>0){const OP=OUTS[A.out]||OUTS.fade;const o_=Object.assign({},OP.fn(outQ,u,G));delete o_.slices;st=applyOut(st,o_)}}
       const st2=Object.assign({},st,{text:null,reel:null,center:false,flash:0});
       X.globalCompositeOperation='source-over';drawUnit(X,u.ln,u,st2,{lw:0},mode==='all'&&!ownI?lay.block:u,R);X.globalAlpha=1}
-    if(S.mg){const r=mgDraw(X,S,t,{W,H,fast:FAST,EIN});if(r){R.x0=Math.min(R.x0,r.x0);R.y0=Math.min(R.y0,r.y0);R.x1=Math.max(R.x1,r.x1);R.y1=Math.max(R.y1,r.y1)}}
+    if(S.mg&&!(F&&F.only)){const r=mgDraw(X,S,t,{W,H,fast:FAST,EIN});if(r){R.x0=Math.min(R.x0,r.x0);R.y0=Math.min(R.y0,r.y0);R.x1=Math.max(R.x1,r.x1);R.y1=Math.max(R.y1,r.y1)}}
     const drew=R.x1>R.x0;
     if(drew&&A.post==='vhs'){const amt=(1-gp)*1+(SM?outQ:0)+.14+(hash(Math.floor(t*8))>.86?.5:0);vhsPost(sc,amt,t,lay.em,W,H)}
-    let sp=-1;if(perLine){SX.forEach(x=>{sp=Math.max(sp,x.sp)})}else{sp=shineP(S,t);if(drew&&sp>=0){shine(X,S,sp,G,lay);SX.push({sh:S.shine,sp,geo:null})}}
-    const atm=atmoState(S,A,I,t);
+    sp=-1;if(perLine){SX.forEach(x=>{sp=Math.max(sp,x.sp)})}else{sp=shineP(S,t);if(drew&&sp>=0){shine(X,S,sp,G,lay);SX.push({sh:S.shine,sp,geo:null})}}
+    atm=atmoState(S,A,I,t);
     if(drew&&atm.flash>0&&S.atmo.textFlash){X.save();X.globalCompositeOperation='source-atop';X.fillStyle=`rgba(255,255,255,${clamp(atm.flash*.8*S.atmo.int)})`;X.fillRect(0,0,W,H);X.restore()}
+    };
+    /* per-word 3D: each word with its own 3D is drawn on its own (its own safe zone), the other words together */
+    const wl=d3Words(S,lay);
+    if(wl.length){const own=new Set(wl.map(o=>o.w.gi));
+      wl.forEach((o,i)=>{const PR={x0:1e9,y0:1e9,x1:-1e9,y1:-1e9};drawFace({only:new Set([o.w.gi])},PR);const pd=Math.ceil(Math.max(lay.em,o.w.em||0)*2.2);o.R=PR;o.cv=null;
+        if(PR.x1>PR.x0){const cx0=Math.max(0,Math.floor(PR.x0-pd)),cy0=Math.max(0,Math.floor(PR.y0-pd)),cx1=Math.min(W,Math.ceil(PR.x1+pd)),cy1=Math.min(H,Math.ceil(PR.y1+pd)),cw=cx1-cx0,ch=cy1-cy0;
+          if(cw>0&&ch>0){const q64=v=>Math.min(Math.max(64,Math.ceil(v/64)*64),Math.max(W,H));const cv=small(sc,'w3w'+i,q64(cw),q64(ch));cv.x.setTransform(1,0,0,1,0,0);cv.x.globalAlpha=1;cv.x.globalCompositeOperation='source-over';cv.x.clearRect(0,0,cv.c.width,cv.c.height);cv.x.drawImage(sc.X.c,cx0,cy0,cw,ch,0,0,cw,ch);o.cv=cv.c;o.cx=cx0;o.cy=cy0;o.cw=cw;o.ch=ch}}
+        if(PR.x1>PR.x0){R.x0=Math.min(R.x0,PR.x0);R.y0=Math.min(R.y0,PR.y0);R.x1=Math.max(R.x1,PR.x1);R.y1=Math.max(R.y1,PR.y1)}});
+      drawFace({skip:own},R)}
+    else drawFace(null,R);
+    const drew=R.x1>R.x0;
     let face=sc.X.c;
     if(A.overlay){const F=sc.F.x;F.setTransform(1,0,0,1,0,0);F.globalAlpha=1;F.globalCompositeOperation='source-over';F.clearRect(0,0,W,H);
       F.globalAlpha=fade;drawOverlay(F,'under',A.id,gp,G);F.globalAlpha=1;F.drawImage(sc.X.c,0,0);F.globalAlpha=fade;drawOverlay(F,'over',A.id,gp,G);F.globalAlpha=1;face=sc.F.c;
@@ -2788,25 +2815,35 @@ const Engine=(()=>{
     const depthEm=S.d3.depth||0;const N=depthEm>0?Math.round(clamp(depthEm*lay.em*.9,2,opts.maxLayers||96)):0;
     const asp=W/H,fov=clamp(S.d3.fov||40,10,100)*DEG,Dc=1/Math.tan(fov/2);tr.gz=Math.min(tr.gz,Dc-.3);
     const toW=(x,y)=>[(x/W*2-1)*asp,1-y/H*2];
-    const pvw=toW(b.cx,tr.top?b.top:b.cy);
-    const ident=Math.abs(tr.rx)<1e-4&&Math.abs(tr.ry)<1e-4&&Math.abs(tr.rz)<1e-4&&Math.abs(tr.gz)<1e-4&&Math.abs(tr.gy)<1e-4&&Math.abs(tr.s-1)<1e-4&&N===0;
-    let M=M4.T(pvw[0],pvw[1]+tr.gy,tr.gz);M=M4.mul(M,M4.RY(tr.ry));M=M4.mul(M,M4.RX(tr.rx));M=M4.mul(M,M4.RZ(tr.rz));M=M4.mul(M,M4.S(tr.s));M=M4.mul(M,M4.T(-pvw[0],-pvw[1],0));
+    const isId=q=>Math.abs(q.rx)<1e-4&&Math.abs(q.ry)<1e-4&&Math.abs(q.rz)<1e-4&&Math.abs(q.gz)<1e-4&&Math.abs(q.gy)<1e-4&&Math.abs(q.s-1)<1e-4&&N===0;
+    const mkM=(q,px,py)=>{const pvw=toW(px,py);let M=M4.T(pvw[0],pvw[1]+q.gy,q.gz);M=M4.mul(M,M4.RY(q.ry));M=M4.mul(M,M4.RX(q.rx));M=M4.mul(M,M4.RZ(q.rz));M=M4.mul(M,M4.S(q.s));M=M4.mul(M,M4.T(-pvw[0],-pvw[1],0));return M};
+    const ident=isId(tr);const M=mkM(tr,b.cx,tr.top?b.top:b.cy);
     const MVP=M4.mul(M4.P(fov,asp,.02,100),M4.mul(M4.T(0,0,-Dc),M));
     const proj=(x,y)=>{if(ident)return[x,y];const w=toW(x,y),v=M4.xf(MVP,w[0],w[1],0);const iw=1/Math.max(1e-4,v[3]);return[(v[0]*iw+1)/2*W,(1-v[1]*iw)/2*H]};
     let src=face,srcA=tr.a;const g=opts.noGL?null:gl();
-    if(drew&&!ident){
-      if(g){const gw=S.glow&&S.glow.on?(S.glow.size||0)*Math.min(W,H)/1080*2.2:0,sw=S.shadow&&S.shadow.on?((S.shadow.blur||0)*1.6+Math.abs(S.shadow.dx||0)+Math.abs(S.shadow.dy||0))*Math.min(W,H)/1080:0;const pad=Math.max(lay.em*1.1,Math.min(W,H)*.03)+gw+sw;const rect={x0:clamp(R.x0-pad,0,W),y0:clamp(R.y0-pad,0,H),x1:clamp(R.x1+pad,0,W),y1:clamp(R.y1+pad,0,H)};
+    /* draws one face canvas in 3D around a pivot; returns the canvas to compose and its alpha */
+    const draw3=(fc,q,pvx,pvy,cr)=>{const Mq=mkM(q,pvx,pvy),MVPq=M4.mul(M4.P(fov,asp,.02,100),M4.mul(M4.T(0,0,-Dc),Mq));
+      if(g){const gw=S.glow&&S.glow.on?(S.glow.size||0)*Math.min(W,H)/1080*2.2:0,sw=S.shadow&&S.shadow.on?((S.shadow.blur||0)*1.6+Math.abs(S.shadow.dx||0)+Math.abs(S.shadow.dy||0))*Math.min(W,H)/1080:0;const pad=Math.max(lay.em*1.1,Math.min(W,H)*.03)+gw+sw;const rect={x0:clamp(R.x0-pad,0,W),y0:clamp(R.y0-pad,0,H),x1:clamp(R.x1+pad,0,W),y1:clamp(R.y1+pad,0,H)};if(cr){rect.x0=clamp(cr.x0,0,W);rect.y0=clamp(cr.y0,0,H);rect.x1=clamp(cr.x1,0,W);rect.y1=clamp(cr.y1,0,H);if(rect.x1<=rect.x0||rect.y1<=rect.y0)return{src:fc,srcA:0}}
         const dz=N?(depthEm*(lay.em/H*2))/N:0;
-        try{g.draw(face,W,H,{mvp:MVP,rect,layers:N,dz,facing:M[10]>=0,sideMode:S.d3.sideMode,side:S.d3.side,shade:S.d3.shade,alpha:tr.a});if(g.gl.isContextLost&&g.gl.isContextLost())throw new Error('context lost');src=g.cv;srcA=1}catch(e){console.warn('3D GL frame',e&&e.message);GLR=GLR&&GLR.ok?GLR:null}}
-      if(src===face){ // 2D fallback (also used for any frame the graphics card can't draw, so 3D never drops to flat)
-        const V=sc.V.x,T=sc.T.x;V.setTransform(1,0,0,1,0,0);V.globalAlpha=1;V.globalCompositeOperation='source-over';V.clearRect(0,0,W,H);
-        const pvx=b.cx,pvy=tr.top?b.top:b.cy,persp=Dc/Math.max(.3,Dc-tr.gz);
-        V.translate(pvx,pvy-tr.gy*H/2);V.rotate(-tr.rz);V.scale(tr.s*persp*Math.cos(tr.ry),tr.s*persp*Math.cos(tr.rx));V.translate(-pvx,-pvy);
-        if(N>0){const dpx=depthEm*lay.em*.55;let dx=-Math.sin(tr.ry)*dpx,dy=Math.sin(tr.rx)*dpx;if(Math.hypot(dx,dy)<dpx*.15){dx=dpx*.25;dy=dpx*.45}
-          T.globalCompositeOperation='source-over';T.globalAlpha=1;T.clearRect(0,0,W,H);T.drawImage(face,0,0);T.globalCompositeOperation='source-atop';T.fillStyle=S.d3.sideMode==='auto'?`rgba(0,0,0,${.35+.4*S.d3.shade})`:S.d3.side;T.fillRect(0,0,W,H);T.globalCompositeOperation='source-over';
-          const steps=Math.min(N,40);for(let i=steps;i>=1;i--)V.drawImage(sc.T.c,dx*i/steps,dy*i/steps)}
-        V.drawImage(face,0,0);V.setTransform(1,0,0,1,0,0);src=sc.V.c}
-    }
+        try{g.draw(fc,W,H,{mvp:MVPq,rect,layers:N,dz,facing:Mq[10]>=0,sideMode:S.d3.sideMode,side:S.d3.side,shade:S.d3.shade,alpha:q.a});if(g.gl.isContextLost&&g.gl.isContextLost())throw new Error('context lost');return{src:g.cv,srcA:1}}catch(e){console.warn('3D GL frame',e&&e.message);GLR=GLR&&GLR.ok?GLR:null}}
+      // 2D fallback (also used for any frame the graphics card can't draw, so 3D never drops to flat)
+      const V=sc.V.x,T=sc.T.x;V.setTransform(1,0,0,1,0,0);V.globalAlpha=1;V.globalCompositeOperation='source-over';V.clearRect(0,0,W,H);
+      const persp=Dc/Math.max(.3,Dc-q.gz);
+      V.translate(pvx,pvy-q.gy*H/2);V.rotate(-q.rz);V.scale(q.s*persp*Math.cos(q.ry),q.s*persp*Math.cos(q.rx));V.translate(-pvx,-pvy);
+      if(N>0){const dpx=depthEm*lay.em*.55;let dx=-Math.sin(q.ry)*dpx,dy=Math.sin(q.rx)*dpx;if(Math.hypot(dx,dy)<dpx*.15){dx=dpx*.25;dy=dpx*.45}
+        T.globalCompositeOperation='source-over';T.globalAlpha=1;T.clearRect(0,0,W,H);T.drawImage(fc,0,0);T.globalCompositeOperation='source-atop';T.fillStyle=S.d3.sideMode==='auto'?`rgba(0,0,0,${.35+.4*S.d3.shade})`:S.d3.side;T.fillRect(0,0,W,H);T.globalCompositeOperation='source-over';
+        const steps=Math.min(N,40);for(let i=steps;i>=1;i--)V.drawImage(sc.T.c,dx*i/steps,dy*i/steps)}
+      V.drawImage(fc,0,0);V.setTransform(1,0,0,1,0,0);return{src:sc.V.c,srcA:q.a}};
+    /* per-word 3D (3D tab › word chips): each word with its own rotation / idle motion is cut out and turned around its own centre */
+    if(drew&&wl.length){
+      const ACC=small(sc,'w3acc',W,H);const Ax=ACC.x;Ax.setTransform(1,0,0,1,0,0);Ax.globalAlpha=1;Ax.globalCompositeOperation='source-over';Ax.clearRect(0,0,W,H);
+      const r0=ident?{src:face,srcA:tr.a}:draw3(face,tr,b.cx,tr.top?b.top:b.cy);Ax.globalAlpha=r0.srcA;Ax.drawImage(r0.src,0,0);
+      const WG=small(sc,'w3word',W,H);wl.forEach(o=>{if(!o.cv)return;const q=threeD(S,A,gp,G,t,o.o,o.n);q.gz=Math.min(q.gz,Dc-.3);
+        const Wx=WG.x;Wx.setTransform(1,0,0,1,0,0);Wx.globalAlpha=1;Wx.globalCompositeOperation='source-over';Wx.clearRect(0,0,W,H);Wx.drawImage(o.cv,0,0,o.cw,o.ch,o.cx,o.cy,o.cw,o.ch);
+        const cr={x0:o.cx,y0:o.cy,x1:o.cx+o.cw,y1:o.cy+o.ch};
+        const r=isId(q)?{src:WG.c,srcA:q.a}:draw3(WG.c,q,o.w.cx,o.w.cy,cr);Ax.globalAlpha=r.srcA;Ax.drawImage(r.src,0,0)});
+      Ax.globalAlpha=1;src=ACC.c;srcA=1}
+    else if(drew&&!ident){const r=draw3(face,tr,b.cx,tr.top?b.top:b.cy);src=r.src;srcA=r.srcA}
     // ----- compose
     tc.setTransform(1,0,0,1,0,0);tc.globalAlpha=1;tc.globalCompositeOperation='source-over';tc.shadowBlur=0;tc.shadowColor='rgba(0,0,0,0)';tc.shadowOffsetX=0;
     tc.clearRect(0,0,W,H);
@@ -3828,24 +3865,37 @@ function negSec(){const lineMode=negScope==='line'&&S.lines.length>1,L=cur();con
     box.append(h('p',{class:'hint'},(lineMode?'Only “'+(L.text||'this line').slice(0,18)+'” is negative; the other lines stay as they are. ':'')+'Keep colors & gradient lets gradients and gradient motion keep moving inside the negative. White gives a true negative. Shows over your video in the preview and in Video + Text exports.'))}
   else box.append(h('p',{class:'hint'},'Difference flips the video inside the letters, Subtract darkens it by the letter color. Pick Selected line to make only some words negative. Needs a video behind the text.'));
   return box}
+let d3Word=-1;
+function d3WordList(){const out=[];(S.lines||[]).forEach(L=>{String(L.text||'').split(/\s+/).filter(Boolean).forEach(w=>out.push(L.float?null:w))});return S.mg?[]:out}
 function buildD3(){/* live view of the selected clip's 3D settings: when a caption edit is copied to every caption the 3D object is replaced, so a fixed reference would leave the sliders changing an object nobody draws */
   const d=new Proxy({},{get:(_,k)=>S.d3[k],set:(_,k,v)=>{S.d3[k]=v;return true},has:(_,k)=>k in S.d3,ownKeys:()=>Reflect.ownKeys(S.d3),getOwnPropertyDescriptor:(_,k)=>({value:S.d3[k],enumerable:true,configurable:true,writable:true})});const p=h('div',{class:'panel'});
   {const caps=capClips(),isCap=selClip().kind==='caption';if(caps.length){const box=sec('3D for',seg([{v:'cap',label:'Caption styles'},{v:'look',label:'This look'}],()=>isCap?'cap':'look',v=>shineFor(v),{label:'3D for'}),
       h('p',{class:'hint'},isCap?'3D here applies to every caption and stays when you change caption style, regenerate or press play. Adjust while it plays to see it live.':'3D here is only on the selected look or text. Switch to Caption styles to put your captions in 3D.'));
-    if(isCap&&d&&(d.rx||d.ry||d.rz||d.depth>0||(d.idle&&d.idle!=='none')))box.append(h('button',{type:'button',class:'pillbtn',onclick:()=>{commit();const flat={rx:0,ry:0,rz:0,depth:0,idle:'none'};const look=P.cap.look||(P.cap.look={});look.s=look.s||{};look.s.d3=Object.assign({},S.d3,flat);capClips().forEach(c=>{c.s.d3=Object.assign({},c.s.d3,flat);if(c.gen)c.gen.s.d3=kj(c.s.d3);if(c.keep&&c.keep.s)delete c.keep.s.d3});S=selClip().s;capTrack();changed();rebuild('d3',true);toast('Captions are flat again')}},'Make captions flat again'));
+    if(isCap&&d&&(d.rx||d.ry||d.rz||d.depth>0||(d.idle&&d.idle!=='none')))box.append(h('button',{type:'button',class:'pillbtn',onclick:()=>{commit();const flat={rx:0,ry:0,rz:0,depth:0,idle:'none',words:null};const look=P.cap.look||(P.cap.look={});look.s=look.s||{};look.s.d3=Object.assign({},S.d3,flat);capClips().forEach(c=>{c.s.d3=Object.assign({},c.s.d3,flat);if(c.gen)c.gen.s.d3=kj(c.s.d3);if(c.keep&&c.keep.s)delete c.keep.s.d3});S=selClip().s;capTrack();changed();rebuild('d3',true);toast('Captions are flat again')}},'Make captions flat again'));
     p.append(box)}}
-  const preset=(label,o)=>h('button',{type:'button',class:'pillbtn',onclick:()=>{Object.assign(d,o);rebuild('d3');changed()}},label);
+  /* word chips: All, or one word that gets its own rotation and idle motion (depth, sides and perspective stay shared) */
+  const WL=d3WordList();if(d3Word>=WL.length||(d3Word>=0&&WL[d3Word]==null))d3Word=-1;const wk=d3Word,isW=wk>=0,isCapW=selClip().kind==='caption';
+  const wget=k=>{const o=S.d3.words&&S.d3.words[wk];return o&&o[k]!==undefined?o[k]:S.d3[k]};
+  const wset=(k,v)=>{const ws=Object.assign({},S.d3.words||{});const o=Object.assign({rx:S.d3.rx||0,ry:S.d3.ry||0,rz:S.d3.rz||0,idle:S.d3.idle||'none',idleAmt:S.d3.idleAmt??.5},ws[wk]||{});o[k]=v;ws[wk]=o;S.d3.words=ws;const ch=document.querySelectorAll('[data-panel="d3"] .d3words button')[wk+1];if(ch)ch.classList.add('own')};
+  const dw=isW?new Proxy({},{get:(_,k)=>wget(k),set:(_,k,v)=>{wset(k,v);return true}}):d;
+  if(WL.filter(x=>x!=null).length>1){const own=i=>!!(S.d3.words&&S.d3.words[i]);const anyOwn=WL.some((_,i)=>own(i));
+    p.append(sec('Words',h('div',{class:'linechips d3words'},h('button',{type:'button','aria-pressed':String(!isW),onclick:()=>{d3Word=-1;rebuild('d3',true)}},'All'),
+        ...WL.map((t,i)=>t==null?null:h('button',{type:'button','aria-pressed':String(wk===i),class:own(i)?'own':null,title:own(i)?'This word has its own 3D':null,onclick:()=>{d3Word=i;rebuild('d3',true)}},t))),
+      h('p',{class:'hint'},isW?('Rotation and idle motion below move only “'+WL[wk]+'”'+(isCapW?' (word '+(wk+1)+' of every caption)':'')+'. Depth, sides and perspective stay shared.'):'Pick a word to give it its own rotation and idle motion. All moves everything together.'),
+      isW||anyOwn?h('div',{class:'pillrow'},isW&&own(wk)?h('button',{type:'button',class:'pillbtn',onclick:()=>{commit();const ws=Object.assign({},S.d3.words);delete ws[wk];S.d3.words=Object.keys(ws).length?ws:null;changed();rebuild('d3',true);toast('“'+WL[wk]+'” follows All again')}},'Reset this word'):null,
+        anyOwn?h('button',{type:'button',class:'pillbtn',onclick:()=>{commit();S.d3.words=null;d3Word=-1;changed();rebuild('d3',true);toast('Every word follows All again')}},'Reset all words'):null):null))}
+  const preset=(label,o)=>h('button',{type:'button',class:'pillbtn',onclick:()=>{commit();Object.assign(dw,o);rebuild('d3');changed()}},label);
   p.append(sec('Extrude',slider('Depth',{min:0,max:1.5,step:.01,get:()=>d.depth,set:v=>d.depth=v,fmt:v=>(+v).toFixed(2)+' em',reset:0}),
     h('div',{class:'ctl'},h('div',{class:'ctl-h'},h('label',null,'Side color')),seg([{v:'auto',label:'Shade of text'},{v:'custom',label:'Custom'}],()=>d.sideMode,v=>{d.sideMode=v;rebuild('d3')},{label:'Side color'})),
     d.sideMode==='custom'?colorCtl('Side',()=>d.side,v=>d.side=v):null,
     slider('Shading',{min:0,max:1,step:.01,get:()=>d.shade,set:v=>d.shade=v,reset:.6})));
-  p.append(sec('Rotation',h('div',{class:'pillrow'},preset('Front',{rx:0,ry:0,rz:0}),preset('Hero',{rx:12,ry:-18,rz:0}),preset('Tilt left',{rx:6,ry:28,rz:0}),preset('Tilt right',{rx:6,ry:-28,rz:0}),preset('Top down',{rx:38,ry:0,rz:0})),
-    slider('Rotate X',{min:-80,max:80,step:.5,get:()=>d.rx,set:v=>d.rx=v,fmt:v=>Math.round(v)+'°',reset:0}),
-    slider('Rotate Y',{min:-80,max:80,step:.5,get:()=>d.ry,set:v=>d.ry=v,fmt:v=>Math.round(v)+'°',reset:0}),
-    slider('Rotate Z',{min:-45,max:45,step:.5,get:()=>d.rz,set:v=>d.rz=v,fmt:v=>Math.round(v)+'°',reset:0}),
+  p.append(sec(isW?'Rotation · '+WL[wk]:'Rotation',h('div',{class:'pillrow'},preset('Front',{rx:0,ry:0,rz:0}),preset('Hero',{rx:12,ry:-18,rz:0}),preset('Tilt left',{rx:6,ry:28,rz:0}),preset('Tilt right',{rx:6,ry:-28,rz:0}),preset('Top down',{rx:38,ry:0,rz:0})),
+    slider('Rotate X',{min:-80,max:80,step:.5,get:()=>dw.rx,set:v=>dw.rx=v,fmt:v=>Math.round(v)+'°',reset:0}),
+    slider('Rotate Y',{min:-80,max:80,step:.5,get:()=>dw.ry,set:v=>dw.ry=v,fmt:v=>Math.round(v)+'°',reset:0}),
+    slider('Rotate Z',{min:-45,max:45,step:.5,get:()=>dw.rz,set:v=>dw.rz=v,fmt:v=>Math.round(v)+'°',reset:0}),
     slider('Perspective',{min:12,max:90,step:1,get:()=>d.fov,set:v=>d.fov=v,fmt:v=>Math.round(v)+'° FOV',reset:40})));
-  p.append(sec('Idle motion',seg([{v:'none',label:'None'},{v:'float',label:'Float'},{v:'sway',label:'Sway'},{v:'spin',label:'Spin'},{v:'wobble',label:'Wobble'},{v:'breathe',label:'Pulse'}],()=>d.idle,v=>d.idle=v,{label:'Idle motion'}),
-    slider('Amount',{min:0,max:2,step:.01,get:()=>d.idleAmt,set:v=>d.idleAmt=v,reset:.5}),
+  p.append(sec(isW?'Idle motion · '+WL[wk]:'Idle motion',seg([{v:'none',label:'None'},{v:'float',label:'Float'},{v:'sway',label:'Sway'},{v:'spin',label:'Spin'},{v:'wobble',label:'Wobble'},{v:'breathe',label:'Pulse'}],()=>dw.idle,v=>dw.idle=v,{label:'Idle motion'}),
+    slider('Amount',{min:0,max:2,step:.01,get:()=>dw.idleAmt,set:v=>dw.idleAmt=v,reset:.5}),
     Engine.hasGL()?null:h('p',{class:'hint'},'WebGL is unavailable in this browser, so 3D uses a flat approximation.')));
   return p}
 
