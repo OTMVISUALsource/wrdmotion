@@ -2563,23 +2563,25 @@ const Engine=(()=>{
      added on top of slightly dimmed letters, with a soft bloom: the light visibly travels across white captions too */
   const SH_LIGHTP=new Set(['pulse','shimmer','scan','flash','roll','gloss','sparkle']);let SHP=null,SHM=null,SHD=null;
   /* with 3D depth the face is stacked into the extrusion, so a glow drawn into it would be copied into every layer (a big banded blob): no bloom there */
-  function shine(c,S,sp,G,lay,sh0,geo){const sh=sh0||S.shine,deep=!!(S.d3&&S.d3.depth>0);
-    if(sh&&SH_LIGHTP.has(sh.type)&&someLight(S,sh.color)){try{const W=c.canvas.width,H=c.canvas.height;const mk=v=>{if(!v){v=document.createElement('canvas')}if(v.width!==W||v.height!==H){v.width=W;v.height=H}return v};SHP=mk(SHP);SHM=mk(SHM);SHD=mk(SHD);
+  function shine(c,S,sp,G,lay,sh0,geo){let sh=sh0||S.shine;const deep=!!(S.d3&&S.d3.depth>0);
+    /* white text: a pure-white light would vanish on it, so the light takes a cool chrome tint instead of greying the letters */
+    if(sh&&SH_LIGHTP.has(sh.type)&&someLight(S,sh.color)&&sh.type!=='flash')sh0=sh=Object.assign({},sh,{color:mix(sh.color||'#ffffff','#8fb8ff',.42)});
+    if(false){try{const W=c.canvas.width,H=c.canvas.height;const mk=v=>{if(!v){v=document.createElement('canvas')}if(v.width!==W||v.height!==H){v.width=W;v.height=H}return v};SHP=mk(SHP);SHM=mk(SHM);SHD=mk(SHD);
       const px=SHP.getContext('2d');px.setTransform(1,0,0,1,0,0);px.globalAlpha=1;px.globalCompositeOperation='source-over';px.clearRect(0,0,W,H);px.fillStyle='#000';px.fillRect(0,0,W,H);
-      shineRaw(px,S,sp,G,lay,Object.assign({},sh,{bloom:0}),geo);
+      const meta0=shineRaw(px,S,sp,G,lay,Object.assign({},sh,{bloom:0,_nob:1}),geo);
       const mx=SHM.getContext('2d');mx.setTransform(1,0,0,1,0,0);mx.globalAlpha=1;mx.globalCompositeOperation='source-over';mx.clearRect(0,0,W,H);mx.drawImage(SHP,0,0);mx.globalCompositeOperation='destination-in';mx.drawImage(c.canvas,0,0);mx.drawImage(c.canvas,0,0);mx.drawImage(c.canvas,0,0);mx.globalCompositeOperation='source-over';
       const env=clamp(bump(clamp(sp))*1.2)*clamp(sh.int??.9,0,1.5),em=geo?geo.em:lay.em;
       /* the letters are dimmed only where they are solid: soft edges, blur and motion trails never turn grey over your video */
       const dx=SHD.getContext('2d');dx.setTransform(1,0,0,1,0,0);dx.globalAlpha=1;dx.globalCompositeOperation='source-over';dx.clearRect(0,0,W,H);dx.fillStyle='rgb(8,12,26)';dx.fillRect(0,0,W,H);dx.globalCompositeOperation='destination-in';for(let k=0;k<4;k++)dx.drawImage(c.canvas,0,0);dx.globalCompositeOperation='source-over';
-      c.save();c.setTransform(1,0,0,1,0,0);c.globalCompositeOperation='source-atop';c.globalAlpha=clamp(.38*env);c.drawImage(SHD,0,0);c.globalAlpha=1;
+      c.save();c.setTransform(1,0,0,1,0,0);c.globalCompositeOperation='source-atop';c.globalAlpha=clamp(.12*env);c.drawImage(SHD,0,0);c.globalAlpha=1;
       c.globalCompositeOperation='lighter';c.globalAlpha=1;c.drawImage(SHM,0,0);
-      if(!FAST&&!deep){c.globalAlpha=clamp(.75*env);c.shadowColor=rgba(sh.color==='#ffffff'?'#bcd4ff':sh.color,1);c.shadowBlur=em*.3;c.drawImage(SHM,0,0)}c.restore();return}catch(e){}}
+      c.restore();if(!deep&&meta0)shineBloom(c,sh,sp,meta0);return}catch(e){}}
     /* every other shine is drawn on a copy and laid back only where the letters are solid,
        so blur, motion trails, glow halos and soft edges never pick up dark flanks or bands (no grey ghosts over the video) */
     try{const W=c.canvas.width,H=c.canvas.height;const mk=v=>{if(!v){v=document.createElement('canvas')}if(v.width!==W||v.height!==H){v.width=W;v.height=H}return v};SHP=mk(SHP);SHD=mk(SHD);
       const cx=SHP.getContext('2d');cx.setTransform(1,0,0,1,0,0);cx.globalAlpha=1;cx.globalCompositeOperation='copy';cx.drawImage(c.canvas,0,0);cx.globalCompositeOperation='source-over';
       const r=shineRaw(cx,S,sp,G,lay,Object.assign({},sh,{_nob:1}),geo);
-      const dx=SHD.getContext('2d');dx.setTransform(1,0,0,1,0,0);dx.globalAlpha=1;dx.globalCompositeOperation='copy';dx.drawImage(SHP,0,0);dx.globalCompositeOperation='destination-in';dx.drawImage(c.canvas,0,0);dx.globalCompositeOperation='source-over';
+      const dx=SHD.getContext('2d');dx.setTransform(1,0,0,1,0,0);dx.globalAlpha=1;dx.globalCompositeOperation='copy';dx.drawImage(SHP,0,0);dx.globalCompositeOperation='destination-in';dx.drawImage(c.canvas,0,0);dx.drawImage(c.canvas,0,0);dx.drawImage(c.canvas,0,0);dx.globalCompositeOperation='source-over';
       c.save();c.setTransform(1,0,0,1,0,0);c.globalAlpha=1;c.globalCompositeOperation='source-over';c.drawImage(SHD,0,0);c.restore();if(!deep)shineBloom(c,sh,sp,r);return r}catch(e){}
     return shineRaw(c,S,sp,G,lay,sh0,geo)}
   function shineRaw(c,S,sp,G,lay,sh0,geo){
@@ -2588,29 +2590,29 @@ const Engine=(()=>{
     /* light text (white captions): a light band alone is invisible on it, so the sweep gets soft shadow flanks (a chrome edge) and a bloom glow that travels with it */
     const light=lightText(S,col),BL=[];
     const band=(pos,w,alpha,stops,ang)=>{BL.push([pos,w,alpha,ang]);c.save();c.translate(cx,cy);c.rotate((ang??sh.angle)*DEG);const g=c.createLinearGradient(pos-w,0,pos+w,0);
-      if(stops)stops.forEach(([o,cc])=>g.addColorStop(o,cc));else if(light){const a=clamp(alpha);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(.16,`rgba(10,14,30,${.34*a})`);g.addColorStop(.36,rgba(col,alpha*.3));g.addColorStop(.5,rgba(col,alpha));g.addColorStop(.64,rgba(col,alpha*.3));g.addColorStop(.84,`rgba(10,14,30,${.34*a})`);g.addColorStop(1,'rgba(0,0,0,0)')}
-      else{g.addColorStop(0,rgba(col,0));g.addColorStop(.32,rgba(col,alpha*.4));g.addColorStop(.5,rgba(col,alpha));g.addColorStop(.68,rgba(col,alpha*.4));g.addColorStop(1,rgba(col,0))}
+      if(stops)stops.forEach(([o,cc])=>g.addColorStop(o,cc));else if(light){const a=clamp(alpha);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(.2,`rgba(10,14,30,${.2*a})`);g.addColorStop(.34,rgba(col,alpha*.18));g.addColorStop(.43,rgba(col,alpha*.62));g.addColorStop(.5,rgba(col,alpha));g.addColorStop(.57,rgba(col,alpha*.62));g.addColorStop(.66,rgba(col,alpha*.18));g.addColorStop(.8,`rgba(10,14,30,${.2*a})`);g.addColorStop(1,'rgba(0,0,0,0)')}
+      else{g.addColorStop(0,rgba(col,0));g.addColorStop(.2,rgba(col,alpha*.06));g.addColorStop(.34,rgba(col,alpha*.3));g.addColorStop(.43,rgba(col,alpha*.72));g.addColorStop(.5,rgba(col,alpha));g.addColorStop(.57,rgba(col,alpha*.72));g.addColorStop(.66,rgba(col,alpha*.3));g.addColorStop(.8,rgba(col,alpha*.06));g.addColorStop(1,rgba(col,0))}
       c.fillStyle=g;c.fillRect(pos-w,-R*2,w*2,R*4);c.restore()};
     const tr=e=>lerp(-R-bw,R+bw,e);
     switch(sh.type){
       case'double':{const e=E.inOutCubic(sp);band(tr(e),bw,I);band(tr(e)-bw*1.7,bw*.28,I*.95);break}
       case'prism':{const a=clamp(I);band(tr(E.inOutCubic(sp)),bw*1.3,I,[[0,'rgba(255,0,80,0)'],[.2,`rgba(255,40,120,${.55*a})`],[.35,`rgba(255,200,40,${.7*a})`],[.5,`rgba(255,255,255,${a})`],[.65,`rgba(40,255,170,${.7*a})`],[.8,`rgba(60,120,255,${.55*a})`],[1,'rgba(60,120,255,0)']]);break}
       case'roll':{c.translate(cx,cy);c.rotate(sh.angle*DEG);const span=(b.bottom-b.top)+em,off=lerp(-span,span,E.inOutSine(sp)),env=bump(sp)*I;
-        const g=c.createLinearGradient(0,off-span,0,off+span);g.addColorStop(0,rgba(col,0));g.addColorStop(.3,`rgba(0,0,0,${.35*env})`);g.addColorStop(.43,rgba(col,0));g.addColorStop(.5,rgba(col,env));g.addColorStop(.57,rgba(col,0));g.addColorStop(.7,`rgba(0,0,0,${.3*env})`);g.addColorStop(1,rgba(col,0));
+        const g=c.createLinearGradient(0,off-span,0,off+span);g.addColorStop(0,rgba(col,0));g.addColorStop(.3,rgba(col,0));g.addColorStop(.43,rgba(col,0));g.addColorStop(.5,rgba(col,env));g.addColorStop(.57,rgba(col,0));g.addColorStop(.7,rgba(col,0));g.addColorStop(1,rgba(col,0));
         c.fillStyle=g;c.fillRect(-R*2,-R*2,R*4,R*4);break}
       case'pulse':{const e=E.outCubic(sp),r=e*R*1.25,env=(1-sp*sp)*I;const g=c.createRadialGradient(cx,cy,Math.max(0,r-bw),cx,cy,r+bw);g.addColorStop(0,rgba(col,0));g.addColorStop(.5,rgba(col,env));g.addColorStop(1,rgba(col,0));c.fillStyle=g;c.fillRect(cx-R*2,cy-R*2,R*4,R*4);
         c.fillStyle=rgba(col,Math.pow(1-sp,3)*.45*I);c.fillRect(cx-R*2,cy-R*2,R*4,R*4);break}
       case'shimmer':{const gl=GL,n=gl.length;gl.forEach((g,k)=>{const v=bump(clamp((sp*(n+3)-k)/3));if(v>0){const gx=c.createLinearGradient(g.x0-em*.08,0,g.x1+em*.08,0);gx.addColorStop(0,rgba(col,0));gx.addColorStop(.5,rgba(col,v*I*.9));gx.addColorStop(1,rgba(col,0));c.fillStyle=gx;c.fillRect(g.x0-em*.08,g.top-em*.05,g.x1-g.x0+em*.16,g.bottom-g.top+em*.1)}});break}
-      case'glint':band(tr(E.inOutCubic(sp)),bw*.35,I*.8);break;
+      case'glint':band(tr(E.inOutCubic(sp)),bw*.55,I*.6);break;
       case'lens':band(tr(E.inOutSine(sp)),bw*1.6,I*.5);break;
-      case'sheen':{const e=E.inOutSine(sp),env=bump(sp);const w=bw*2.4,tint=mix(col,'#cfe3ff',.35);band(tr(e),w,I*.55*env,[[0,rgba(tint,0)],[.28,rgba(tint,.32*I*env)],[.5,rgba('#ffffff',.85*I*env)],[.72,rgba(tint,.32*I*env)],[1,rgba(tint,0)]]);band(tr(e),bw*.25,I*env);break}
-      case'flash':{const env=Math.pow(bump(clamp(sp*1.25)),1.6);c.fillStyle=rgba(col,clamp(.62*I*env));c.fillRect(cx-R*2,cy-R*2,R*4,R*4);band(tr(E.outCubic(sp)),bw*.3,I*(1-sp));break}
+      case'sheen':{const e=E.inOutSine(sp),env=bump(sp);const w=bw*2.4,tint=mix(col,'#cfe3ff',.35);band(tr(e),w,I*.55*env,[[0,rgba(tint,0)],[.28,rgba(tint,.32*I*env)],[.5,rgba('#ffffff',.85*I*env)],[.72,rgba(tint,.32*I*env)],[1,rgba(tint,0)]]);band(tr(e),bw*.42,I*.8*env);break}
+      case'flash':{const env=Math.pow(bump(clamp(sp*1.25)),1.6);c.fillStyle=rgba(col,clamp(.4*I*env));c.fillRect(cx-R*2,cy-R*2,R*4,R*4);band(tr(E.outCubic(sp)),bw*.3,I*(1-sp));break}
       case'scan':{const e=E.inOutCubic(sp),span=(b.bottom-b.top)/2+em*.5,pos=lerp(-span,span,e),env=bump(sp);c.save();c.translate(cx,cy);c.rotate(sh.angle*DEG*.25);
         let g=c.createLinearGradient(0,pos-em*.5,0,pos+em*.5);g.addColorStop(0,rgba(col,0));g.addColorStop(.42,rgba(col,.25*I*env));g.addColorStop(.5,rgba('#ffffff',I*env));g.addColorStop(.58,rgba(col,.25*I*env));g.addColorStop(1,rgba(col,0));c.fillStyle=g;c.fillRect(-R*2,pos-em*.5,R*4,em);
         g=c.createLinearGradient(0,pos-span*1.2,0,pos);g.addColorStop(0,rgba(col,0));g.addColorStop(1,rgba(col,.14*I*env));c.fillStyle=g;c.fillRect(-R*2,pos-span*1.2,R*4,span*1.2);c.restore();break}
       case'gloss':case'sparkle':{const q=clamp(sp),e=q<.5?4*q*q*q:1-Math.pow(-2*q+2,3)/2,w=bw*2.2,pos=lerp(-R-w,R+w*.3,e),a_=clamp(I);
         band(pos,w,I,[[0,rgba(col,0)],[.4,rgba(col,.2*a_)],[.7,rgba(col,.55*a_)],[.86,rgba('#ffffff',.95*a_)],[.9,rgba('#ffffff',a_)],[.93,rgba(col,.2*a_)],[1,rgba(col,0)]]);
-        band(pos+w*.78,bw*.09,I*.9);break}
+        band(pos+w*.78,bw*.16,I*.7);break}
       case'aurora':{const e=E.inOutSine(sp),a_=clamp(I);band(tr(e),bw*2,I,[[0,'rgba(61,255,214,0)'],[.25,`rgba(61,255,214,${.42*a_})`],[.5,`rgba(255,255,255,${.85*a_})`],[.75,`rgba(196,107,255,${.42*a_})`],[1,'rgba(196,107,255,0)']]);break}
       case'triple':{const e=E.inOutCubic(sp);for(let k=0;k<3;k++){const ek=E.inOutCubic(clamp(sp*1.35-k*.14));band(tr(ek),bw*(.42-k*.08),I*1.15*(1-k*.15))}break}
       case'cross':{const e=E.inOutCubic(sp),env=bump(sp);band(tr(e),bw*.5,I*.9,null,sh.angle);band(-tr(e),bw*.5,I*.9,null,-sh.angle);c.save();c.globalCompositeOperation='source-atop';const g=c.createRadialGradient(cx,cy,0,cx,cy,em*1.2);g.addColorStop(0,rgba('#ffffff',.35*I*Math.pow(bump(clamp((sp-.3)/.4)),2)));g.addColorStop(1,rgba(col,0));c.fillStyle=g;c.fillRect(cx-em*1.3,cy-em*1.3,em*2.6,em*2.6);c.restore();break}
@@ -2624,9 +2626,9 @@ const Engine=(()=>{
   function shineBloom(c,sh,sp,meta){if(!meta)return;const {BL,cx,cy,R,light,em,col,I}=meta;
     /* bloom: the part of the text under the band glows outward, like a light sweep in After Effects */
     if(BL.length&&!FAST&&(sh.bloom??(light?1:.55))>0)try{const W=c.canvas.width,H=c.canvas.height;if(!SHBL)SHBL=document.createElement('canvas');if(SHBL.width!==W||SHBL.height!==H){SHBL.width=W;SHBL.height=H}
-      const k=SHBL.getContext('2d');k.setTransform(1,0,0,1,0,0);k.globalCompositeOperation='source-over';k.globalAlpha=1;k.clearRect(0,0,W,H);k.drawImage(c.canvas,0,0);k.globalCompositeOperation='destination-in';
+      const k=SHBL.getContext('2d');k.setTransform(1,0,0,1,0,0);k.globalCompositeOperation='source-over';k.globalAlpha=1;k.clearRect(0,0,W,H);k.drawImage(c.canvas,0,0);k.globalCompositeOperation='destination-in';k.drawImage(c.canvas,0,0);k.drawImage(c.canvas,0,0);
       BL.forEach(([pos,w,alpha,ang])=>{k.save();k.translate(cx,cy);k.rotate((ang??sh.angle)*DEG);const g=k.createLinearGradient(pos-w*.6,0,pos+w*.6,0);g.addColorStop(0,'rgba(255,255,255,0)');g.addColorStop(.5,`rgba(255,255,255,${clamp(alpha)})`);g.addColorStop(1,'rgba(255,255,255,0)');k.fillStyle=g;k.fillRect(pos-w,-R*2,w*2,R*4);k.restore()});
-      const amt=clamp((sh.bloom??(light?1:.55))*I*bump(clamp(sp)),0,1.4);if(amt>.01){c.save();c.setTransform(1,0,0,1,0,0);c.globalCompositeOperation='lighter';c.globalAlpha=clamp(amt*.8);c.shadowColor=rgba(col,1);c.shadowBlur=em*.35;c.drawImage(SHBL,0,0);c.shadowBlur=em*.12;c.globalAlpha=clamp(amt*.5);c.drawImage(SHBL,0,0);c.restore()}}catch(e){}}
+      const amt=clamp((sh.bloom??(light?1:.55))*I*bump(clamp(sp)),0,1.4);if(amt>.01){c.save();c.setTransform(1,0,0,1,0,0);c.globalCompositeOperation='destination-over';c.globalAlpha=clamp(amt*.95);c.shadowColor=rgba(col,1);c.shadowBlur=em*.42;c.drawImage(SHBL,0,0);c.shadowBlur=em*.14;c.globalAlpha=clamp(amt*.6);c.drawImage(SHBL,0,0);c.globalCompositeOperation='lighter';c.shadowBlur=0;c.globalAlpha=clamp(amt*.22);c.drawImage(SHBL,0,0);c.restore()}}catch(e){}}
   let SHBL=null;
   /* at least one line is light (white or near white): plain white light would vanish on it */
   function someLight(S,col){try{const lum=h=>{const [r,g,b]=hex2rgb(h);return(.2126*r+.7152*g+.0722*b)/255};return lum(col||'#ffffff')>.7&&(S.lines||[]).some(L=>{const m=MATS[L.mat]||MATS.flat;return(m===MATS.flat||m.user===2)&&lum(L.c1||'#ffffff')>.72})}catch(e){return false}}
@@ -2732,7 +2734,7 @@ const Engine=(()=>{
     const R={x0:1e9,y0:1e9,x1:-1e9,y1:-1e9};const perLine=S.lines.some(L=>L.shine&&(L.shine.mode==='own'||L.shine.mode==='off'));const SX=[];let PGu=false,PGc=null;
     let sp=-1,atm=null;
     /* draws the text face into X. F (per-word 3D) limits it to some words: {only:Set} or {skip:Set} of word numbers; R collects the drawn bounds */
-    const drawFace=(F,R)=>{X.setTransform(1,0,0,1,0,0);X.globalCompositeOperation='source-over';X.globalAlpha=1;X.clearRect(0,0,W,H);SX.length=0;
+    const drawFace=(F,R)=>{X.setTransform(1,0,0,1,0,0);X.globalCompositeOperation='source-over';X.globalAlpha=1;X.clearRect(0,0,W,H);
     const wOK=gi=>!F||(F.only?F.only.has(gi):!F.skip.has(gi));
     for(const ln0 of (S.mg||(F&&F.only&&!(lay.order||lay.lines).length)?[]:(lay.order||lay.lines))){
       if(F&&!ln0.words.some(w=>wOK(w.gi)))continue;
@@ -2778,7 +2780,7 @@ const Engine=(()=>{
         else drawUnit(c,ln,u,st,sty,pv_,LR)});
       c.shadowBlur=0;c.shadowColor='rgba(0,0,0,0)';c.globalAlpha=1;
       if(LR.x1>LR.x0){R.x0=Math.min(R.x0,LR.x0);R.y0=Math.min(R.y0,LR.y0);R.x1=Math.max(R.x1,LR.x1);R.y1=Math.max(R.y1,LR.y1)}
-      if(needPost&&LR.x1>LR.x0){const r=reg(LR,W,H,4+ln.px*(ln.L.lglow?.9:.25));postLine(sc,ln,M,r);if(perLine){const es=effShine(ln.L,S);if(es&&es.on){const spL=shineP(es,t);if(spL>=0){const own=ln.L.shine&&ln.L.shine.mode==='own';const geo=own?{block:{x0:ln.x0,x1:ln.x1,top:ln.top,bottom:ln.bottom,cx:ln.cx,cy:ln.cy},em:ln.px,glyphs:ln.glyphs}:null;shine(L,S,spL,G,lay,es,geo);SX.push({sh:es,sp:spL,geo})}}}if(gmP&&LP>.002&&r.w>0&&!(F&&F.only)){if(!PGu){PGc=small(sc,'PGc',W,H);PGc.x.setTransform(1,0,0,1,0,0);PGc.x.globalAlpha=1;PGc.x.globalCompositeOperation='source-over';PGc.x.clearRect(0,0,W,H);PGu=true}const a_=(ln.L.gm.amt??1);for(const [rr,al,key] of [[ln.px*.15*(1+.3*LP),.9,'gPw'],[ln.px*.045,.7,'gPt']]){const bl=blurred(sc,sc.L.c,W,H,Math.max(1,rr),null,key);PGc.x.globalAlpha=clamp(LP*a_*al);PGc.x.drawImage(bl,0,0,W,H)}PGc.x.globalAlpha=1}if(r.w>0&&r.h>0){const lg=ln.L.lglow;if(lg&&lg.int>0){for(const [rad,ia,key] of (FAST?[[lg.size*ln.px*1.1,lg.int*1.7,'lgW']]:[[lg.size*ln.px*1.3,lg.int*1.3,'lgW'],[lg.size*ln.px*.38,lg.int*1.0,'lgT']])){const bl=blurred(sc,sc.L.c,W,H,Math.max(1,rad),lg.color,key);let a=ia;while(a>.01){X.globalAlpha=Math.min(1,a);X.drawImage(bl,0,0,W,H);a-=1}}X.globalAlpha=1}X.drawImage(sc.L.c,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h)}}
+      if(needPost&&LR.x1>LR.x0){const r=reg(LR,W,H,4+ln.px*(ln.L.lglow?.9:.25));postLine(sc,ln,M,r);if(perLine){const es=effShine(ln.L,S);if(es&&es.on){const spL=shineP(es,t);if(spL>=0){const own=ln.L.shine&&ln.L.shine.mode==='own';const geo=own?{block:{x0:ln.x0,x1:ln.x1,top:ln.top,bottom:ln.bottom,cx:ln.cx,cy:ln.cy},em:ln.px,glyphs:ln.glyphs}:null;shine(L,S,spL,G,lay,es,geo);if(!SX.some(x=>x.li===ln.li))SX.push({sh:es,sp:spL,geo,li:ln.li})}}}if(gmP&&LP>.002&&r.w>0&&!(F&&F.only)){if(!PGu){PGc=small(sc,'PGc',W,H);PGc.x.setTransform(1,0,0,1,0,0);PGc.x.globalAlpha=1;PGc.x.globalCompositeOperation='source-over';PGc.x.clearRect(0,0,W,H);PGu=true}const a_=(ln.L.gm.amt??1);for(const [rr,al,key] of [[ln.px*.15*(1+.3*LP),.9,'gPw'],[ln.px*.045,.7,'gPt']]){const bl=blurred(sc,sc.L.c,W,H,Math.max(1,rr),null,key);PGc.x.globalAlpha=clamp(LP*a_*al);PGc.x.drawImage(bl,0,0,W,H)}PGc.x.globalAlpha=1}if(r.w>0&&r.h>0){const lg=ln.L.lglow;if(lg&&lg.int>0){for(const [rad,ia,key] of (FAST?[[lg.size*ln.px*1.1,lg.int*1.7,'lgW']]:[[lg.size*ln.px*1.3,lg.int*1.3,'lgW'],[lg.size*ln.px*.38,lg.int*1.0,'lgT']])){const bl=blurred(sc,sc.L.c,W,H,Math.max(1,rad),lg.color,key);let a=ia;while(a>.01){X.globalAlpha=Math.min(1,a);X.drawImage(bl,0,0,W,H);a-=1}}X.globalAlpha=1}X.drawImage(sc.L.c,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h)}}
     }
     if(lay.img&&!(F&&F.only)){const u=lay.img;let st;const SP_=logoSpan(S);const okA=x=>x&&!x.custom&&!x.overlay&&!x.global;
       let IA=S.img.anim&&ANIM_BY[S.img.anim];if(!okA(IA)&&SP_.custom)IA=okA(A)?A:ANIM_BY.blurpop;const IOA=ANIM_BY[S.img.outAnim||S.outAnim],ownI=okA(IA);
@@ -2802,7 +2804,7 @@ const Engine=(()=>{
     if(S.mg&&!(F&&F.only)){const r=mgDraw(X,S,t,{W,H,fast:FAST,EIN});if(r){R.x0=Math.min(R.x0,r.x0);R.y0=Math.min(R.y0,r.y0);R.x1=Math.max(R.x1,r.x1);R.y1=Math.max(R.y1,r.y1)}}
     const drew=R.x1>R.x0;
     if(drew&&A.post==='vhs'){const amt=(1-gp)*1+(SM?outQ:0)+.14+(hash(Math.floor(t*8))>.86?.5:0);vhsPost(sc,amt,t,lay.em,W,H)}
-    sp=-1;if(perLine){SX.forEach(x=>{sp=Math.max(sp,x.sp)})}else{sp=shineP(S,t);if(drew&&sp>=0){shine(X,S,sp,G,lay);SX.push({sh:S.shine,sp,geo:null})}}
+    sp=-1;if(perLine){SX.forEach(x=>{sp=Math.max(sp,x.sp)})}else if(!drew&&SX.some(x=>x.li==null)){sp=shineP(S,t)}else{sp=shineP(S,t);if(drew&&sp>=0){shine(X,S,sp,G,lay);if(!SX.some(x=>x.li==null))SX.push({sh:S.shine,sp,geo:null})}}
     atm=atmoState(S,A,I,t);
     if(drew&&atm.flash>0&&S.atmo.textFlash){X.save();X.globalCompositeOperation='source-atop';X.fillStyle=`rgba(255,255,255,${clamp(atm.flash*.8*S.atmo.int)})`;X.fillRect(0,0,W,H);X.restore()}
     };
@@ -2861,7 +2863,7 @@ const Engine=(()=>{
     tc.clearRect(0,0,W,H);
     const bgc=bgColor(S.bg);if(bgc){tc.fillStyle=bgc;tc.fillRect(0,0,W,H)}
     if(!drew)return{lay,proj};
-    const vis=clamp(gp*2)*fadeO*tr.a;const boost=1+(sp>=0?bump(sp)*.55:0);
+    const vis=clamp(gp*2)*fadeO*tr.a;const boost=1+(sp>=0?bump(sp)*.22:0);
     tc.imageSmoothingEnabled=true;tc.imageSmoothingQuality='high';
     if(S.atmo&&(S.atmo.type==='storm'||S.atmo.type==='clouds'))drawClouds(tc,S,lay,t,vis,atm);
     if(S.flare&&S.flare.on){const F=S.flare,fp=clamp((tau-I*.2)/Math.max(.05,I*.8));let fw=1,fo=0,fa=1;
@@ -3264,9 +3266,22 @@ document.addEventListener('pointerdown',()=>{CLOUD.armed=true},{capture:true,onc
 document.addEventListener('keydown',()=>{CLOUD.armed=true},{capture:true,once:true});
 window.addEventListener('wrd-license',()=>{CLOUD.pulled=false;setTimeout(()=>{cloudPull(false);try{rebuild('looks',true)}catch(e){}},50)});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&CLOUD.on&&Date.now()-CLOUD.last>60000){CLOUD.pulled=false;cloudPull(false)}});
+/* switching looks keeps what the creator typed: their words go into the new look's lines (split across stacked looks), only untouched sample text is replaced */
+let LOOK_SAMPLES=null;
+function lookSample(t){if(!LOOK_SAMPLES){LOOK_SAMPLES=new Set();LOOKS.forEach(l=>{try{const ls=(l.s&&l.s.lines)||[];LOOK_SAMPLES.add(ls.map(L=>String(L.text||'').trim().toLowerCase()).join('\n'))}catch(e){}})}return LOOK_SAMPLES.has(t)}
+function keepTyped(ns,old){try{if(!old||!old.lines||!ns||!ns.lines||ns.mg||old.mg)return;const typed=old.lines.filter(L=>!L.float).map(L=>String(L.text||'').trim()).filter(Boolean);if(!typed.length)return;
+  const key=old.lines.map(L=>String(L.text||'').trim().toLowerCase()).join('\n');if(lookSample(key)||key==='text')return;
+  const slots=ns.lines.map((L,i)=>i).filter(i=>!ns.lines[i].float),N=slots.length;if(!N)return;let parts=typed.slice();
+  /* one typed line on a stacked look: spread its words over the look's lines, keeping word order */
+  if(parts.length<N){const words=parts.join(' ').split(/\s+/).filter(Boolean);if(words.length>=N&&parts.length===1){parts=[];const per=words.length/N;for(let k=0;k<N;k++)parts.push(words.slice(Math.round(k*per),Math.round((k+1)*per)).join(' '))}
+    else if(parts.length===1&&words.length<N)parts=words}
+  const keep=[];ns.lines.forEach((L,i)=>{if(L.float){keep.push(L);return}const k=slots.indexOf(i);if(k<parts.length){L.text=parts[k];keep.push(L)}});
+  /* more typed lines than the look has: extra lines take the last line's style */
+  if(parts.length>N){const last=ns.lines[slots[N-1]];for(let k=N;k<parts.length;k++)keep.push(Object.assign(structuredClone(last),{text:parts[k]}))}
+  ns.lines=keep;if(ns.counter&&ns.counter.on&&!keep.some(L=>/\d/.test(L.text||'')))ns.counter.on=false}catch(e){console.warn('keep typed text',e)}}
 function buildLooks(){const g=h('div',{class:'grid2'});const lkHint=capClips().length?h('p',{class:'hint',style:'margin:0 0 8px'},P.cap.lookFrom?'Your captions use the look “'+P.cap.lookFrom+'”. Tap None to put them back to their caption style.':'Select a caption on the timeline, then tap a look to restyle every caption with it. None puts captions back to their caption style.'):null;
   const mkLook=(lk,g)=>{const cv=h('canvas',{width:300,height:333});const tile=h('button',{type:'button',class:'tile look',style:'--c:#f2b33d','aria-label':'Apply look '+lk.name},cv,h('span',{class:'name'},lk.name),lk.tag?h('span',{class:'newtag'},lk.tag):null);
-    tile.addEventListener('click',()=>{commit();useRec('looks',lk.name);setTimeout(()=>refreshRecent('looks'),350);let c=selClip();if(c.kind==='caption'&&lk.capcfg){capApplyPreset(lk,'all');return}let ns=fromLook(lk,{aspect:P.aspect,bg:P.bg});if(c.draft){const st=P.video?Math.min(T,Math.max(0,P.video.dur-.5)):0;if(P.video)ns.dur=Math.min(ns.dur,Math.max(.5,P.video.dur-st));c=newClip(ns,Math.round(st*100)/100);P.clips.push(c);P.sel=c.id;S=ns;linkProject();sel=0;refreshAll();seek(c.start);setPlaying(true);changed();toast(lk.name+' added at '+fmtT(c.start));return}if(c.kind==='caption'){ns=styleOnto(ns,S);P.cap.lookFrom=lk.name}else if(P.clips.length>1||P.video)ns.dur=S.dur;c.s=ns;S=ns;linkProject();sel=0;refreshAll();seek(c.start);setPlaying(true);changed();const r=recommendKey(S);toast(lk.name+' applied · best key: '+KEYS[r.mode].name)});
+    tile.addEventListener('click',()=>{commit();useRec('looks',lk.name);setTimeout(()=>refreshRecent('looks'),350);let c=selClip();if(c.kind==='caption'&&lk.capcfg){capApplyPreset(lk,'all');return}let ns=fromLook(lk,{aspect:P.aspect,bg:P.bg});if(c.kind!=='caption')keepTyped(ns,c.s);if(c.draft){const st=P.video?Math.min(T,Math.max(0,P.video.dur-.5)):0;if(P.video)ns.dur=Math.min(ns.dur,Math.max(.5,P.video.dur-st));c=newClip(ns,Math.round(st*100)/100);P.clips.push(c);P.sel=c.id;S=ns;linkProject();sel=0;refreshAll();seek(c.start);setPlaying(true);changed();toast(lk.name+' added at '+fmtT(c.start));return}if(c.kind==='caption'){ns=styleOnto(ns,S);P.cap.lookFrom=lk.name}else if(P.clips.length>1||P.video)ns.dur=S.dur;c.s=ns;S=ns;linkProject();sel=0;refreshAll();seek(c.start);setPlaying(true);changed();const r=recommendKey(S);toast(lk.name+' applied · best key: '+KEYS[r.mode].name)});
     g.append(tile);queueRender(()=>{const st=fromLook(lk);st.flare.on=false;st.aspect='9:10';st.bg={mode:'transparent'};st.d3.idle='none';renderMini(cv,st,Math.min(st.dur-.05,st.inDur+.15+(st.shine.on?Math.max(0,st.shine.start-st.inDur-.15)+st.shine.dur*.45:0)))});
     const lkSt=()=>{const st=fromLook(lk);st.flare.on=false;st.aspect='9:10';st.bg={mode:'transparent'};st.d3.idle='none';return st};hoverPlay(tile,cv,lkSt,Math.max(1.2,Math.min(3,fromLook(lk).dur||2)));
     tile.addEventListener('pointerleave',()=>queueRender(()=>{const st=lkSt();renderMini(cv,st,Math.min(st.dur-.05,st.inDur+.15+(st.shine.on?Math.max(0,st.shine.start-st.inDur-.15)+st.shine.dur*.45:0)))}))};{const caps=capClips().length>0,isCap=selClip().kind==='caption';const capLooked=!!(P.cap.lookFrom||(P.cap.look&&((P.cap.look.s&&Object.keys(P.cap.look.s).length)||(P.cap.look.la&&Object.keys(P.cap.look.la).length))));
@@ -3276,7 +3291,7 @@ function buildLooks(){const g=h('div',{class:'grid2'});const lkHint=capClips().l
       if(c.draft||c.kind==='caption'){toast(caps?'Your captions already use their caption style':'Nothing to remove: pick a look to add text');return}
       commit();const keep=c.s.lines.map(L=>L.text);const ns=fromLook({s:{lines:keep.map(t=>Ln({text:t}))}},{aspect:P.aspect,bg:P.bg});ns.dur=c.s.dur;c.s=ns;S=ns;sel=0;linkProject();refreshAll();changed();toast('Look removed · plain text kept')});
     g.append(none);
-    const lkW=l=>l.tag==='PACK'?3:l.cap?2:l.tag?1:0;const order=LOOKS.map((lk,i)=>[lk,i]).sort((a,b)=>(lkW(b[0])-lkW(a[0]))||(b[0].cap&&a[0].cap?a[1]-b[1]:a[1]-b[1]));order.forEach(([lk])=>mkLook(lk,g))}
+    const lkW=l=>l.pin?9:l.tag==='PACK'?3:l.cap?2:l.tag?1:0;const order=LOOKS.map((lk,i)=>[lk,i]).sort((a,b)=>(lkW(b[0])-lkW(a[0]))||(b[0].cap&&a[0].cap?a[1]-b[1]:a[1]-b[1]));order.forEach(([lk])=>mkLook(lk,g))}
   const myp=myPresets();const mg=h('div',{class:'grid2 mypre'});myp.forEach((lk,idx)=>{mkLook(lk,mg);const tile=mg.lastChild;const x=h('span',{class:'x',role:'button','aria-label':'Delete preset '+lk.name},'×');
     x.addEventListener('click',e=>{e.stopPropagation();const arr=myPresets();arr.splice(idx,1);saveMyPresets(arr);rebuild('looks');toast('Preset deleted')});tile.append(x)});
   const nm=h('input',{class:'txtin',placeholder:'Name this preset (e.g. Views counter)',maxlength:'40'});
@@ -3439,7 +3454,7 @@ function buildShine(){const p=h('div',{class:'panel'});if(shineTgt>=S.lines.leng
     const still=['pulse','flash'].includes(sh.id)?.3:.5;
     queueRender(()=>renderMini(cv,mk(),still));
     tile.addEventListener('click',()=>{commit();useRec('shine',sh.id);let o;if(shineTgt>=0){const L=S.lines[shineTgt];if(!L.shine||L.shine.mode!=='own')L.shine=Object.assign(structuredClone(L.shine&&L.shine.mode==='own'?L.shine:S.shine),{mode:'own'});o=L.shine}else o=S.shine;
-      o.type=sh.id;o.on=true;{const rd=textReady(S);if(!(+o.start>=rd-.05))o.start=Math.round(rd*100)/100;const od=+o.dur||.8;if(o.start+od>S.dur-.05)o.start=Math.max(0,Math.round((S.dur-od-.1)*100)/100)}seekClip(Math.max(0,o.start-.25));setPlaying(true);changed();rebuild('shine',true)});
+      o.type=sh.id;o.on=true;o.int=Math.max(+o.int||0,1.1);o.width=.4;o.dur=Math.max(+o.dur||0,1);{const rd=textReady(S);if(!(+o.start>=rd-.05))o.start=Math.round(rd*100)/100;const od=+o.dur||.8;if(o.start+od>S.dur-.05)o.start=Math.max(0,Math.round((S.dur-od-.1)*100)/100)}seekClip(Math.max(0,o.start-.25));setPlaying(true);changed();rebuild('shine',true)});
     tile.addEventListener('pointerleave',()=>queueRender(()=>renderMini(cv,mk(),still)));
     hoverPlay(tile,cv,mk,1.3);g.append(tile)};newFirst(SHINES,x=>x.tag).forEach(sh=>mkShine(sh,g));
   p.append(recentBlock('shine',(id,gg)=>{const sh=SHINES.find(x=>x.id===id);if(sh)mkShine(sh,gg)}));
@@ -3999,8 +4014,10 @@ $('#keyTip').addEventListener('click',()=>{const pop=$('#keyPop');pop.hidden=!po
 /* layout: desktop columns vs mobile dock */
 const LIB=['video','looks','mg','anim','sfx','shine','fx'],INSP=['text','size','style','grad','gloss','logo','d3','safe'],MOB=['video','looks','mg','anim','sfx','text','size','style','grad','gloss','fx','shine','safe','logo','d3'];
 let libTab='video',inspTab='text',mobTab='video';
-function ensurePanel(id){if(!panelEls[id]){panelEls[id]=h('div',{'data-panel':id});panelEls[id].append(PANELS[id].build())}return panelEls[id]}
-function rebuild(id,keepScroll){const el=panelEls[id];if(!el)return;const sc=el.parentElement?el.parentElement.scrollTop:0;el.replaceChildren(PANELS[id].build());if(keepScroll&&el.parentElement)el.parentElement.scrollTop=sc}
+function ensurePanel(id){if(!panelEls[id]){panelEls[id]=h('div',{'data-panel':id});panelEls[id].append(PANELS[id].build())}else if(STALE.has(id)){STALE.delete(id);panelEls[id].replaceChildren(PANELS[id].build())}return panelEls[id]}
+/* panels that are not on screen are rebuilt when they are next opened, not on every change (keeps switching looks instant) */
+const STALE=new Set();
+function rebuild(id,keepScroll){const el=panelEls[id];if(!el)return;if(!el.isConnected){STALE.add(id);return}STALE.delete(id);const sc=el.parentElement?el.parentElement.scrollTop:0;el.replaceChildren(PANELS[id].build());if(keepScroll&&el.parentElement)el.parentElement.scrollTop=sc}
 function refreshAll(){Object.keys(panelEls).forEach(k=>{if(k!=='looks')rebuild(k,true)});updAspect();updBg();updTimeline();updKey()}
 const isMob=()=>matchMedia('(max-width:979px)').matches;
 function tabBar(nav,ids,getCur,setCur){const keep=nav.scrollLeft;nav.replaceChildren(...ids.map(id=>{const b=h('button',{type:'button',role:'tab','aria-selected':String(getCur()===id),title:PANELS[id].t,style:`--tc:${PANELS[id].c}`,html:svg(id)+`<span>${PANELS[id].t}</span>`});b.addEventListener('click',()=>{setCur(id);placePanels()});return b}));
@@ -4381,7 +4398,10 @@ function drawPreview(){const t0=performance.now();try{lastInfo=renderSeq(T,view,
   const x=tx(T);$('#ph').style.left=x+'px';
   if(playing&&!tlDragging){const sl=tlS.scrollLeft,vw=tlS.clientWidth;if(x>sl+vw-30||x<sl)tlS.scrollLeft=Math.max(0,x-60)}
   updSel();updSafeWarn()}
-function updSel(){const sb=$('#selbox');if(playing||!lastInfo||!lastInfo.lay||isExporting){sb.hidden=true;return}const ln=lastInfo.lay.lines[sel];if(!ln||!ln.glyphs.length){sb.hidden=true;return}
+/* the move / scale / rotate box only shows after the creator taps the text (or grabs a handle); tapping anywhere else hides it */
+let selVis=false;
+document.addEventListener('pointerdown',e=>{const t=e.target;if(t&&t.closest&&(t.closest('#selbox')||t===view))return;if(selVis){selVis=false;try{updSel()}catch(_){}}},true);
+function updSel(){const sb=$('#selbox');if(!selVis||playing||!lastInfo||!lastInfo.lay||isExporting){sb.hidden=true;return}const ln=lastInfo.lay.lines[sel];if(!ln||!ln.glyphs.length){sb.hidden=true;return}
   const k=viewCss.w/view.width,L_=ln.x0*k-6,T_=ln.top*k-6;sb.hidden=false;sb.style.left=L_+'px';sb.style.top=T_+'px';sb.style.width=(ln.width*k+12)+'px';sb.style.height=((ln.bottom-ln.top)*k+12)+'px';
   const fine=matchMedia('(pointer:fine)').matches;sb.classList.toggle('xf',fine);sb.classList.toggle('rotb',T_<34);
   const blk=lastInfo.lay.block,rz=+((S.d3&&S.d3.rz)||0);
@@ -4426,7 +4446,8 @@ function capBlock(){const c=selClip();if(!c||c.kind!=='caption')return null;try{
   view.addEventListener('pointerdown',e=>{
   if(!lastInfo||!lastInfo.lay){const act=P.clips.filter(c=>T>=c.start&&T<c.start+c.s.dur);if(act.length){selectClip(act[act.length-1].id)}return}
   const r=view.getBoundingClientRect();const k=view.width/r.width;const x=(e.clientX-r.left)*k,y=(e.clientY-r.top)*k;
-  const lines=lastInfo.lay.lines;let hit=-1;lines.forEach((ln,i)=>{if(x>=ln.x0-20&&x<=ln.x1+20&&y>=ln.top-20&&y<=ln.bottom+20)hit=i});if(hit<0)return;
+  const lines=lastInfo.lay.lines;let hit=-1;lines.forEach((ln,i)=>{if(x>=ln.x0-20&&x<=ln.x1+20&&y>=ln.top-20&&y<=ln.bottom+20)hit=i});if(hit<0){if(selVis){selVis=false;updSel()}return}
+  selVis=true;
   if(hit!==sel){sel=hit;rebuild('text');rebuild('style')}
   const cap=selClip().kind==='caption';
   if(cap){const act=capClips().filter(c=>T>=c.start&&T<c.start+c.s.dur),cur=selClip();if(act.length&&!act.includes(cur))selectClip(act[act.length-1].id)}
@@ -5551,6 +5572,14 @@ function packState(ws,c,P_){const k=clamp(c.size||1,.3,3),W_=ws.map(w=>UP(w.w,c)
   if(P_.d){const d=P_.d;const L=Ln({text:d.t,font:d.f||'poppins',weight:d.w||900,size:(d.s||220)*k,track:-.02,c1:d.c||'#000000',strokeW:d.sw||3,strokeC:d.sc||'#3a3a3a'});L.float=1;L.back=1;L.fx=(d.fx||0)*k;L.fy=(d.fy||0)*k;L.anim='tm_youcan';if(d.op!=null)L.strokeC=mix('#000000',d.sc||'#ffffff',d.op);lines.push(L)}
   const acc=c.color||P_.color,gw=P_.glow;
   return{anim:P_.an||'tm_youcan',lines,lineGap:(P_.gap??-12)*k,outMode:'smart',outDur:.22,glow:gw?{on:true,color:gw[0]==='acc'?acc:gw[0],size:gw[1],int:gw[2]}:{on:false},shadow:P_.sh===0?{on:false}:{on:true,op:.38,blur:14,dx:0,dy:5}}}
+/* Super Easy: lead words fan out (Rotate Y +42 / -42), the last word tips back (Rotate X -61) in a gold bubble gradient with a satin sheen */
+CAPSTYLES.unshift({id:'supereasy',name:'Super Easy Captions',isNew:1,pack:1,pin:1,cat:'glow',sample:'SUPER EASY CAPTIONS',pos:.5,max:3,wordDur:.3,color:'#ffffff',
+  shine:{on:true,type:'sheen',start:.35,dur:1,int:1.1,width:.4,angle:18},
+  build(ws,c){const k=c.size||1,W=ws.map(w=>String(w.w).toUpperCase()),n=W.length,lead=W.slice(0,Math.max(0,n-1)),big=n?W[n-1]:'';const lines=[];
+    if(lead.length)lines.push(Ln({text:lead.join(' '),font:'unbounded',weight:800,size:92*k,track:.02,c1:c.color||'#ffffff'}));
+    lines.push(Ln({text:big,font:'anton',weight:400,size:250*k,track:.01,mat:'gradient',c1:'#ffe55c',c2:'#ff9419',gAng:90,gl:{style:'bubble',amt:.85,size:.55,color:'#ffffff'}}));
+    const words={};if(lead.length>1){words[0]={v:2,ry:42};words[lead.length-1]={v:2,ry:-42}}else if(lead.length===1)words[0]={v:2,ry:42};words[n-1]={v:2,rx:-61};
+    return{anim:'blurpop',lineGap:-10,lines,d3:{rx:0,ry:0,rz:0,fov:82,depth:0,words},shadow:{on:true,color:'#000000',op:.5,blur:10,dx:0,dy:6},glow:{on:false}}}});
 PACK.forEach(P_=>{CAPSTYLES.push({id:P_.id,name:P_.name,isNew:1,pack:1,cat:P_.cat,sample:P_.sample,groups:P_.g,pos:P_.pos??.5,max:P_.max??(P_.split==='one'?2:P_.split==='w'?4:5),wordDur:P_.wordDur??.3,color:P_.color,build(ws,c){return packState(ws,c,P_)}})});
 CAPSTYLES.forEach(cs=>{if(!cs.cat)cs.cat='classic'});
 const CAP_BY=Object.fromEntries(CAPSTYLES.map(x=>[x.id,x]));
@@ -5565,7 +5594,7 @@ function capLook(id,text,name,so){try{const cs=CAP_BY[id];if(!cs)return null;con
  ['creator','So you wanna learn','Creator Stack'],['wavy','wavy text','Wavy Text'],['neonserif','You hate editing','Neon Serif'],['persp','built the text','3D Perspective']]
  .forEach(([id,txt,name,so])=>{const lk=capLook(id,txt,name,so);if(lk)LOOKS.push(lk)});
 /* the stylized caption pack as Looks, each with its reference wording */
-CAPSTYLES.filter(cs=>cs.pack).forEach(cs=>{const lk=capLook(cs.id,cs.sample,cs.name);if(lk){lk.tag='PACK';LOOKS.push(lk)}});
+CAPSTYLES.filter(cs=>cs.pack).forEach(cs=>{const lk=capLook(cs.id,cs.sample,cs.name);if(lk){lk.tag=cs.pin?'NEW':'PACK';if(cs.pin)lk.pin=1;LOOKS.push(lk)}});
 function heightUnits(){const [aw,ah]=aspectWH(P.aspect);return 1080*ah/Math.min(aw,ah)}
 /* per-caption overrides: a caption can have its own style (c.capo) and its own highlighted words (c.emphW) */
 function capCfg(clip){if(P.cap&&P.cap.style==='stkfire')P.cap.style='stacked';if(clip&&clip.capo&&clip.capo.style==='stkfire')clip.capo.style='stacked';let cfg=clip&&clip.capo?Object.assign({},P.cap,clip.capo):P.cap;if(clip&&(clip.emphW||clip.gradW||clip.gradAll||clip.mv||clip.mvs||clip.neg)){cfg=Object.assign({},cfg);if(Array.isArray(clip.gradW))cfg.gradW=clip.gradW;if(clip.gradAll)cfg.gradAll=true;if(clip.neg){if(clip.neg.mode)cfg.negMode=clip.neg.mode;if(Array.isArray(clip.neg.words))cfg.negW=clip.neg.words;if(clip.neg.color)cfg.negColor=clip.neg.color;if(clip.neg.amt!=null&&isFinite(+clip.neg.amt))cfg.negAmt=+clip.neg.amt;if(clip.neg.keep!=null)cfg.negKeep=!!clip.neg.keep}if(clip.emphW)cfg.emphW=clip.emphW;if(clip.mv){cfg.mvx=+clip.mv.x||0;cfg.mvy=+clip.mv.y||0}if(clip.mvs&&+clip.mvs>0)cfg.size=clamp((cfg.size||1)*(+clip.mvs),.2,4)}return cfg}
@@ -5579,6 +5608,7 @@ function capState(ws,start,dur,c){const cs=CAP_BY[c.style]||CAPSTYLES[0];const s
   if(o.anchorTop!=null)o.anchorTop=clamp(c.pos-.1+mvy/heightUnits(),-.6,1.5);else{const shift=(c.pos-.5)*heightUnits()+mvy;o.lines.forEach(L=>{L.dy=(L.dy||0)+shift})}
   if(c.dx||mvx)o.lines.forEach(L=>{L.dx=(L.dx||0)+(c.dx||0)+mvx});
   const g0=o.glow;Object.assign(o,{dur,inDur:.3,outMode:o.outMode||'fade',outDur:o.outDur??.12,stagger:0,wordDur:c.wordDur,words:ws.map(w=>Math.max(0,w.s-start-.02)),shine:capShineFor(c.shine,dur,capReady(ws.map(w=>Math.max(0,w.s-start-.02)),c.wordDur)),glow:g0||{on:false},flare:{on:false},d3:d3o?Object.assign({depth:0},d3o):{depth:0},lineGap:o.lineGap??-6});
+  if(cs.shine&&!(c.shine&&c.shine.on))o.shine=Object.assign({},o.shine,cs.shine);
   if(cs.emph){let bi=0,bv=-1;ws.forEach((w,i)=>{const v=wscore(w.w);if(v>bv){bv=v;bi=i}});o.emph=bv>=3?[bi]:[];o.emphColor=c.emph}
   if(Array.isArray(c.emphW)){o.emph=c.emphW.filter(i=>i>=0&&i<ws.length);o.emphColor=c.emph}
   /* gradient words: picked words only. Once words are being picked (gradWords), a caption with no picks gets none, so the gradient never spills onto the rest */
