@@ -2586,6 +2586,9 @@ const Engine=(()=>{
     return shineRaw(c,S,sp,G,lay,sh0,geo)}
   function shineRaw(c,S,sp,G,lay,sh0,geo){
     const sh=sh0||S.shine,b=geo?geo.block:lay.block,em=geo?geo.em:lay.em,GL=geo?geo.glyphs:lay.glyphs,I=sh.int,col=sh.color;c.save();c.globalCompositeOperation='source-atop';
+    /* direction: forward (left to right), reverse, down or up; the light patterns are turned around the text's centre */
+    const vert=sh.type==='scan'||sh.type==='roll',dir=sh.dir||(vert?'down':'fwd');
+    if(sh.type!=='shimmer'&&dir!==(vert?'down':'fwd')){c.translate(b.cx,b.cy);if(vert){/* these lights travel top to bottom by nature */if(dir==='up')c.scale(1,-1);else{c.rotate(-Math.PI/2);if(dir==='rev')c.scale(1,-1)}}else if(dir==='rev')c.scale(-1,1);else{c.rotate(Math.PI/2);if(dir==='up')c.scale(-1,1)}c.translate(-b.cx,-b.cy)}
     const cx=b.cx,cy=b.cy,R=Math.hypot(b.x1-b.x0,b.bottom-b.top)/2+em*.6,bw=Math.max(4,sh.width*em*1.4);
     /* light text (white captions): a light band alone is invisible on it, so the sweep gets soft shadow flanks (a chrome edge) and a bloom glow that travels with it */
     const light=lightText(S,col),BL=[];
@@ -2602,7 +2605,7 @@ const Engine=(()=>{
         c.fillStyle=g;c.fillRect(-R*2,-R*2,R*4,R*4);break}
       case'pulse':{const e=E.outCubic(sp),r=e*R*1.25,env=(1-sp*sp)*I;const g=c.createRadialGradient(cx,cy,Math.max(0,r-bw),cx,cy,r+bw);g.addColorStop(0,rgba(col,0));g.addColorStop(.5,rgba(col,env));g.addColorStop(1,rgba(col,0));c.fillStyle=g;c.fillRect(cx-R*2,cy-R*2,R*4,R*4);
         c.fillStyle=rgba(col,Math.pow(1-sp,3)*.45*I);c.fillRect(cx-R*2,cy-R*2,R*4,R*4);break}
-      case'shimmer':{const gl=GL,n=gl.length;gl.forEach((g,k)=>{const v=bump(clamp((sp*(n+3)-k)/3));if(v>0){const gx=c.createLinearGradient(g.x0-em*.08,0,g.x1+em*.08,0);gx.addColorStop(0,rgba(col,0));gx.addColorStop(.5,rgba(col,v*I*.9));gx.addColorStop(1,rgba(col,0));c.fillStyle=gx;c.fillRect(g.x0-em*.08,g.top-em*.05,g.x1-g.x0+em*.16,g.bottom-g.top+em*.1)}});break}
+      case'shimmer':{const gl=GL,n=gl.length;const ord=dir==='rev'?gl.map((_,k)=>n-1-k):dir==='down'||dir==='up'?(()=>{const ix=gl.map((g,k)=>[g.top+g.cx*1e-4,k]).sort((a,b)=>dir==='down'?a[0]-b[0]:b[0]-a[0]);const o=[];ix.forEach(([_,k],r)=>o[k]=r);return o})():null;gl.forEach((g,k0)=>{const k=ord?ord[k0]:k0;const v=bump(clamp((sp*(n+3)-k)/3));if(v>0){const gx=c.createLinearGradient(g.x0-em*.08,0,g.x1+em*.08,0);gx.addColorStop(0,rgba(col,0));gx.addColorStop(.5,rgba(col,v*I*.9));gx.addColorStop(1,rgba(col,0));c.fillStyle=gx;c.fillRect(g.x0-em*.08,g.top-em*.05,g.x1-g.x0+em*.16,g.bottom-g.top+em*.1)}});break}
       case'glint':band(tr(E.inOutCubic(sp)),bw*.55,I*.6);break;
       case'lens':band(tr(E.inOutSine(sp)),bw*1.6,I*.5);break;
       case'sheen':{const e=E.inOutSine(sp),env=bump(sp);const w=bw*2.4,tint=mix(col,'#cfe3ff',.35);band(tr(e),w,I*.55*env,[[0,rgba(tint,0)],[.28,rgba(tint,.32*I*env)],[.5,rgba('#ffffff',.85*I*env)],[.72,rgba(tint,.32*I*env)],[1,rgba(tint,0)]]);band(tr(e),bw*.42,I*.8*env);break}
@@ -2622,12 +2625,12 @@ const Engine=(()=>{
       default:band(tr(E.inOutCubic(sp)),bw,I);
     }
     c.restore();
-    const meta={BL,cx,cy,R,light,em,col,I};if(sh._nob)return meta;shineBloom(c,sh,sp,meta);return meta}
+    const meta={BL,cx,cy,R,light,em,col,I,dir:sh.type==='shimmer'?'fwd':dir};if(sh._nob)return meta;shineBloom(c,sh,sp,meta);return meta}
   function shineBloom(c,sh,sp,meta){if(!meta)return;const {BL,cx,cy,R,light,em,col,I}=meta;
     /* bloom: the part of the text under the band glows outward, like a light sweep in After Effects */
     if(BL.length&&!FAST&&(sh.bloom??(light?1:.55))>0)try{const W=c.canvas.width,H=c.canvas.height;if(!SHBL)SHBL=document.createElement('canvas');if(SHBL.width!==W||SHBL.height!==H){SHBL.width=W;SHBL.height=H}
       const k=SHBL.getContext('2d');k.setTransform(1,0,0,1,0,0);k.globalCompositeOperation='source-over';k.globalAlpha=1;k.clearRect(0,0,W,H);k.drawImage(c.canvas,0,0);k.globalCompositeOperation='destination-in';k.drawImage(c.canvas,0,0);k.drawImage(c.canvas,0,0);
-      BL.forEach(([pos,w,alpha,ang])=>{k.save();k.translate(cx,cy);k.rotate((ang??sh.angle)*DEG);const g=k.createLinearGradient(pos-w*.6,0,pos+w*.6,0);g.addColorStop(0,'rgba(255,255,255,0)');g.addColorStop(.5,`rgba(255,255,255,${clamp(alpha)})`);g.addColorStop(1,'rgba(255,255,255,0)');k.fillStyle=g;k.fillRect(pos-w,-R*2,w*2,R*4);k.restore()});
+      BL.forEach(([pos,w,alpha,ang])=>{k.save();k.translate(cx,cy);if(meta.dir==='rev')k.scale(-1,1);else if(meta.dir==='down'||meta.dir==='up'){k.rotate(Math.PI/2);if(meta.dir==='up')k.scale(-1,1)}k.rotate((ang??sh.angle)*DEG);const g=k.createLinearGradient(pos-w*.6,0,pos+w*.6,0);g.addColorStop(0,'rgba(255,255,255,0)');g.addColorStop(.5,`rgba(255,255,255,${clamp(alpha)})`);g.addColorStop(1,'rgba(255,255,255,0)');k.fillStyle=g;k.fillRect(pos-w,-R*2,w*2,R*4);k.restore()});
       const amt=clamp((sh.bloom??(light?1:.55))*I*bump(clamp(sp)),0,1.4);if(amt>.01){c.save();c.setTransform(1,0,0,1,0,0);c.globalCompositeOperation='destination-over';c.globalAlpha=clamp(amt*.95);c.shadowColor=rgba(col,1);c.shadowBlur=em*.42;c.drawImage(SHBL,0,0);c.shadowBlur=em*.14;c.globalAlpha=clamp(amt*.6);c.drawImage(SHBL,0,0);c.globalCompositeOperation='lighter';c.shadowBlur=0;c.globalAlpha=clamp(amt*.22);c.drawImage(SHBL,0,0);c.restore()}}catch(e){}}
   let SHBL=null;
   /* at least one line is light (white or near white): plain white light would vanish on it */
@@ -2879,9 +2882,9 @@ const Engine=(()=>{
     tc.globalAlpha=srcA;tc.drawImage(src,0,0);tc.globalAlpha=1;
     for(const ex of SX){const sh_=ex.sh,sp=ex.sp,gb=ex.geo?ex.geo.block:b;if(!(sh_.type==='glint'||sh_.type==='lens'))continue;{const em=ex.geo?ex.geo.em:lay.em,col=sh_.color==='#ffffff'?'#bcd4ff':sh_.color,I=sh_.int*fadeO;
       if(sh_.type==='glint'){const gl_=ex.geo?ex.geo.glyphs:lay.glyphs;if(gl_.length){const last=gl_[gl_.length-1],first=gl_[Math.min(gl_.length-1,Math.floor(gl_.length*.35))];
-        const p1=clamp(sp*1.6),q1=proj(last.x1-(last.x1-last.x0)*.2,last.top+em*.12);star(tc,q1[0],q1[1],em*.95*bump(p1),p1*1.3,col,I);
-        const p2=clamp(sp*1.6-.6),q2=proj(first.cx,first.top+em*.05);star(tc,q2[0],q2[1],em*.55*bump(p2),-p2,col,I*.8)}}
-      else{const x=lerp(-.3*W,1.3*W,E.inOutSine(sp)),y=proj(gb.cx,gb.cy)[1],env=bump(sp)*I;tc.save();tc.globalCompositeOperation='lighter';
+        const sp1=(sh_.dir==='rev'||sh_.dir==='up')?clamp(sp-.375):sp,sp2=(sh_.dir==='rev'||sh_.dir==='up')?clamp(sp+.375):sp;const p1=clamp(sp1*1.6),q1=proj(last.x1-(last.x1-last.x0)*.2,last.top+em*.12);star(tc,q1[0],q1[1],em*.95*bump(p1),p1*1.3,col,I);
+        const p2=clamp(sp2*1.6-.6),q2=proj(first.cx,first.top+em*.05);star(tc,q2[0],q2[1],em*.55*bump(p2),-p2,col,I*.8)}}
+      else{const d_=sh_.dir||'fwd',ee=E.inOutSine(sp),vert=d_==='down'||d_==='up';const x=vert?proj(gb.cx,gb.cy)[0]:lerp(d_==='rev'?1.3*W:-.3*W,d_==='rev'?-.3*W:1.3*W,ee),y=vert?lerp(d_==='up'?gb.bottom+lay.em*.6:gb.top-lay.em*.6,d_==='up'?gb.top-lay.em*.6:gb.bottom+lay.em*.6,ee):proj(gb.cx,gb.cy)[1],env=bump(sp)*I;tc.save();tc.globalCompositeOperation='lighter';
         tc.translate(x,y);tc.scale(W*.55,em*.05);let gg=tc.createRadialGradient(0,0,0,0,0,1);gg.addColorStop(0,`rgba(255,255,255,${clamp(env)})`);gg.addColorStop(.25,rgba(col,.7*env));gg.addColorStop(1,rgba(col,0));tc.fillStyle=gg;tc.beginPath();tc.arc(0,0,1,0,7);tc.fill();
         tc.setTransform(1,0,0,1,0,0);gg=tc.createRadialGradient(x,y,0,x,y,em*.9);gg.addColorStop(0,`rgba(255,255,255,${.8*env})`);gg.addColorStop(.3,rgba(col,.35*env));gg.addColorStop(1,rgba(col,0));tc.fillStyle=gg;tc.fillRect(x-em,y-em,em*2,em*2);
         const mx=W/2,my=H/2;[[-.35,.18,'#7affc4'],[-.7,.1,'#b06bff'],[.4,.12,'#ffd27a']].forEach(([k,rr_,cc])=>{const gx=mx+(x-mx)*k,gy=my+(y-my)*k,r=em*rr_*3;const g2=tc.createRadialGradient(gx,gy,r*.6,gx,gy,r);g2.addColorStop(0,rgba(cc,.05*env));g2.addColorStop(.85,rgba(cc,.18*env));g2.addColorStop(1,rgba(cc,0));tc.fillStyle=g2;tc.beginPath();tc.arc(gx,gy,r,0,7);tc.fill()});
@@ -3161,9 +3164,11 @@ function queueRender(fn){rq.push(fn);if(!rqOn){rqOn=true;requestAnimationFrame(r
 function runQ(){if(SPBUSY){setTimeout(()=>requestAnimationFrame(runQ),150);return}const t0=performance.now();while(rq.length&&performance.now()-t0<9){try{rq.shift()()}catch(e){console.warn(e)}}if(rq.length)requestAnimationFrame(runQ);else rqOn=false}
 function miniState(o){const s=fromLook({s:Object.assign({glow:{on:true,size:22,int:.45},flare:{on:false},shine:{on:false},d3:{depth:0},dur:2,inDur:.9,outMode:'none',stagger:.5,autoFit:true,lineGap:-20,bg:{mode:'transparent'}},o)});s.aspect='3:2';return s}
 const LAZYTILES=/iPhone|iPad|Android/i.test(navigator.userAgent)||(/Mac/.test(navigator.userAgent)&&navigator.maxTouchPoints>1)||matchMedia('(pointer:coarse)').matches;
-const TILE_IO=LAZYTILES&&'IntersectionObserver' in window?new IntersectionObserver(es=>{es.forEach(e=>{const cv=e.target;cv._vis=e.isIntersecting;if(e.isIntersecting&&cv._pend){const q=cv._pend;cv._pend=null;queueRender(()=>{try{Engine.render(q[0],q[1],cv,{noGL:true})}catch(er){console.warn(er)}})}})},{rootMargin:'240px'}):null;
+const TILE_IO=LAZYTILES&&'IntersectionObserver' in window?new IntersectionObserver(es=>{es.forEach(e=>{const cv=e.target;cv._vis=e.isIntersecting;if(e.isIntersecting&&cv._pend){const q=cv._pend;cv._pend=null;queueRender(()=>{try{Engine.render(q[0],q[1],cv,{noGL:!mini3D(q[0])})}catch(er){console.warn(er)}})}})},{rootMargin:'240px'}):null;
 function renderMini(cv,state,t,now){if(TILE_IO&&!now&&cv&&cv.isConnected!==undefined){if(!cv._io){cv._io=1;cv._vis=false;TILE_IO.observe(cv)}if(!cv._vis){cv._pend=[state,t];return}}
-  try{Engine.render(state,t,cv,{noGL:true})}catch(e){console.warn(e)}}
+  try{Engine.render(state,t,cv,{noGL:!mini3D(state)})}catch(e){console.warn(e)}}
+/* previews of 3D looks use the real 3D renderer, so tilted / fanned words look exactly like the result */
+function mini3D(st){const d=st&&st.d3;return!!(d&&(d.depth>0||d.rx||d.ry||d.rz||(d.words&&Object.keys(d.words).length)))}
 const hov={tile:null,state:null,t0:0,len:2};
 /* a tile can be re-drawn the moment it's tapped (the panel refreshes); the preview finds its replacement by this key */
 function tileKey(t){const d=t.dataset||{};for(const k of['cap','anim','shine','gm','look'])if(d[k])return`[data-${k}="${d[k]}"]`;const a=t.getAttribute('aria-label');return a?`button[aria-label="${a.replace(/"/g,'\\"')}"]`:null}
@@ -3465,6 +3470,7 @@ function buildShine(){const p=h('div',{class:'panel'});if(shineTgt>=S.lines.leng
     colorCtl('Shine color',()=>X().color,v=>X().color=v),
     slider('Intensity',{min:0,max:1.5,step:.01,get:()=>X().int,set:v=>X().int=v,reset:.9}),
     slider('Band width',{min:.05,max:1.2,step:.01,get:()=>X().width,set:v=>X().width=v,reset:.35}),
+    h('div',{class:'ctl'},h('div',{class:'ctl-h'},h('label',null,'Direction')),seg([{v:'fwd',label:'Forward'},{v:'rev',label:'Reverse'}],()=>{const d=X().dir;return d==='rev'||d==='up'?'rev':'fwd'},v=>{const vt=['scan','roll'].includes(X().type);X().dir=vt?(v==='rev'?'up':'down'):v;if(!playing){const o=X();seekClip(Math.max(0,(+o.start||0)-.2));setPlaying(true)}},{label:'Shine direction'})),
     slider('Angle',{min:-75,max:75,step:1,get:()=>X().angle,set:v=>X().angle=v,fmt:v=>Math.round(v)+'°',reset:18}),
     tgtL&&mode==='own'?h('button',{type:'button',class:'pillbtn',onclick:()=>{commit();const src=X();const {mode:_m,...rest}=src;Object.assign(S.shine,structuredClone(rest));S.lines.forEach(L=>delete L.shine);shineTgt=-1;changed();rebuild('shine',true);toast('Shine applied to all lines')}},'Apply this shine to all lines'):null));
   p.append(sec('Shine timing',
